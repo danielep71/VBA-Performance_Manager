@@ -128,7 +128,7 @@ If you do **not** include that companion module, the core timing features still 
 The class defaults to:
 
 ```vb
-PM.StrictMode = True
+cPM.StrictMode = True
 ```
 
 In strict mode, invalid usage raises errors. Examples include:
@@ -149,21 +149,21 @@ In non-strict mode, the class falls back where possible.
 ```vb
 Sub Example_BasicTiming()
 
-    Dim PM          As cPerformanceManager
+    Dim cPM          As cPerformanceManager
     Dim ElapsedS    As Double
 
-    Set PM = New cPerformanceManager
+    Set cPM = New cPerformanceManager
 
-    PM.StartTimer
+    cPM.StartTimer
 
     Range("A1:A10000").Value = 1
 
-    ElapsedS = PM.ElapsedSeconds
+    ElapsedS = cPM.ElapsedSeconds
 
     Debug.Print "Elapsed seconds: " & Format$(ElapsedS, "0.000000000")
 
-    PM.ResetEnvironment
-    Set PM = Nothing
+    cPM.ResetEnvironment
+    Set cPM = Nothing
 
 End Sub
 ```
@@ -173,18 +173,18 @@ End Sub
 ```vb
 Sub Example_ElapsedTimeText()
 
-    Dim PM As cPerformanceManager
+    Dim cPM As cPerformanceManager
 
-    Set PM = New cPerformanceManager
+    Set cPM = New cPerformanceManager
 
-    PM.StartTimer 5
+    cPM.StartTimer 5
 
     Application.Calculate
 
-    Debug.Print PM.ElapsedTime
+    Debug.Print cPM.ElapsedTime
 
-    PM.ResetEnvironment
-    Set PM = Nothing
+    cPM.ResetEnvironment
+    Set cPM = Nothing
 
 End Sub
 ```
@@ -194,19 +194,19 @@ End Sub
 ```vb
 Sub Example_SpecificMethod()
 
-    Dim PM As cPerformanceManager
+    Dim cPM As cPerformanceManager
 
-    Set PM = New cPerformanceManager
+    Set cPM = New cPerformanceManager
 
-    PM.StartTimer 2
+    cPM.StartTimer 2
 
     Worksheets(1).Range("A1").Formula = "=RAND()"
 
-    Debug.Print "Method used: " & PM.MethodName(PM.ActiveMethodID)
-    Debug.Print "Elapsed seconds: " & Format$(PM.ElapsedSeconds, "0.000000000")
+    Debug.Print "Method used: " & cPM.MethodName(cPM.ActiveMethodID)
+    Debug.Print "Elapsed seconds: " & Format$(cPM.ElapsedSeconds, "0.000000000")
 
-    PM.ResetEnvironment
-    Set PM = Nothing
+    cPM.ResetEnvironment
+    Set cPM = Nothing
 
 End Sub
 ```
@@ -216,19 +216,19 @@ End Sub
 ```vb
 Sub Example_AlignedStart()
 
-    Dim PM As cPerformanceManager
+    Dim cPM As cPerformanceManager
 
-    Set PM = New cPerformanceManager
+    Set cPM = New cPerformanceManager
 
-    PM.StartTimer 5, True
+    cPM.StartTimer 5, True
 
     DoEvents
 
     Debug.Print "Aligned elapsed seconds: " & _
-                Format$(PM.ElapsedSeconds, "0.000000000")
+                Format$(cPM.ElapsedSeconds, "0.000000000")
 
-    PM.ResetEnvironment
-    Set PM = Nothing
+    cPM.ResetEnvironment
+    Set cPM = Nothing
 
 End Sub
 ```
@@ -238,20 +238,20 @@ End Sub
 ```vb
 Sub Example_TimeWasters()
 
-    Dim PM As cPerformanceManager
+    Dim cPM As cPerformanceManager
 
-    Set PM = New cPerformanceManager
+    Set cPM = New cPerformanceManager
 
-    PM.TW_Turn_OFF
-    PM.StartTimer 5
+    cPM.TW_Turn_OFF
+    cPM.StartTimer 5
 
     Range("A1:A50000").Formula = "=ROW()"
 
-    Debug.Print PM.ElapsedSeconds
+    Debug.Print cPM.ElapsedSeconds
 
-    PM.TW_Turn_ON
-    PM.ResetEnvironment
-    Set PM = Nothing
+    cPM.TW_Turn_ON
+    cPM.ResetEnvironment
+    Set cPM = Nothing
 
 End Sub
 ```
@@ -261,23 +261,23 @@ End Sub
 ```vb
 Sub Example_SafePattern()
 
-    Dim PM As cPerformanceManager
+    Dim cPM As cPerformanceManager
 
     On Error GoTo CleanFail
 
-    Set PM = New cPerformanceManager
+    Set cPM = New cPerformanceManager
 
-    PM.TW_Turn_OFF
-    PM.StartTimer 5
+    cPM.TW_Turn_OFF
+    cPM.StartTimer 5
 
     Worksheets(1).UsedRange.Calculate
 
-    Debug.Print "Elapsed: " & PM.ElapsedTime
+    Debug.Print "Elapsed: " & cPM.ElapsedTime
 
 CleanExit:
-    If Not PM Is Nothing Then
-        PM.ResetEnvironment
-        Set PM = Nothing
+    If Not cPM Is Nothing Then
+        cPM.ResetEnvironment
+        Set cPM = Nothing
     End If
     Exit Sub
 
@@ -332,20 +332,22 @@ The class exposes diagnostics to inspect the timing environment:
 ```vb
 Sub Example_Diagnostics()
 
-    Dim PM As cPerformanceManager
+    Dim cPM As cPerformanceManager
 
-    Set PM = New cPerformanceManager
+    Set cPM = New cPerformanceManager
 
-    Debug.Print PM.Get_SystemTickInterval
-    Debug.Print PM.QPC_Get_SystemTickInterval
-    Debug.Print PM.QPC_FrequencyPerSecond
-    Debug.Print PM.QPC_FrequencyPerSecond_Value
+    Debug.Print cPM.Get_SystemTickInterval
+    Debug.Print cPM.QPC_Get_SystemTickInterval
+    Debug.Print cPM.QPC_FrequencyPerSecond
+    Debug.Print cPM.QPC_FrequencyPerSecond_Value
 
-    PM.ResetEnvironment
-    Set PM = Nothing
+    cPM.ResetEnvironment
+    Set cPM = Nothing
 
 End Sub
 ```
+
+---
 
 ## Benchmark guidance
 
@@ -356,6 +358,22 @@ For most benchmark scenarios:
 - use `ElapsedTime()` for presentation and logging
 - use `AlignToNextTick := True` only when the extra polling cost is justified
 - use TW suppression only when you explicitly want to reduce Excel-side noise
+
+---
+
+## Recommended repository structure
+
+```text
+cPerformanceManager/
+├─ src/
+│  └─ cPerformanceManager.cls
+├─ tests/
+│  └─ Test_cPerformanceManager.bas
+├─ examples/
+│  └─ Examples_cPerformanceManager.bas
+├─ README.md
+└─ LICENSE
+```
 
 ---
 
