@@ -345,9 +345,8 @@ Sub Example_Diagnostics()
     Set cPM = Nothing
 
 End Sub
-```
 
----
+```
 
 ## Benchmark guidance
 
@@ -358,22 +357,6 @@ For most benchmark scenarios:
 - use `ElapsedTime()` for presentation and logging
 - use `AlignToNextTick := True` only when the extra polling cost is justified
 - use TW suppression only when you explicitly want to reduce Excel-side noise
-
----
-
-## Recommended repository structure
-
-```text
-cPerformanceManager/
-├─ src/
-│  └─ cPerformanceManager.cls
-├─ tests/
-│  └─ Test_cPerformanceManager.bas
-├─ examples/
-│  └─ Examples_cPerformanceManager.bas
-├─ README.md
-└─ LICENSE
-```
 
 ---
 
