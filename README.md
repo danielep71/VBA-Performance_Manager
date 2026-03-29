@@ -149,7 +149,7 @@ In non-strict mode, the class falls back where possible.
 ```vb
 Sub Example_BasicTiming()
 
-    Dim cPM          As cPerformanceManager
+    Dim cPM         As cPerformanceManager
     Dim ElapsedS    As Double
 
     Set cPM = New cPerformanceManager
@@ -376,4 +376,4 @@ Daniele Penza
 
 ## Version
 
-2.0
+1.0.0
