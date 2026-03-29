@@ -1,0 +1,755 @@
+Attribute VB_Name = "M_cPM_TimeWasters"
+'==============================================================================
+' MODULE: M_cPM_TimeWasters
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Shared, process-wide manager for Excel "time-waster" suppression used by
+'   cPerformanceManager.
+'
+' WHY THIS EXISTS
+'   The Excel Application properties controlled here are global process state,
+'   not instance-local state:
+'
+'     - ScreenUpdating
+'     - EnableEvents
+'     - DisplayAlerts
+'     - Calculation
+'     - Cursor
+'
+'   Therefore:
+'     - multiple cPerformanceManager instances can overlap,
+'     - each instance can request a different exemption mask,
+'     - restore logic must be coordinated globally,
+'     - the final restore must happen exactly once when the last active session
+'       ends.
+'
+' REQUIRED BY
+'   cPerformanceManager v1.0.
+'
+' COMPILE-TIME CONTRACT
+'   This module is required by cPerformanceManager because the class directly
+'   references the following procedures exposed here:
+'
+'     - PM_TW_BeginSession
+'     - PM_TW_EndSession
+'     - PM_TW_ActiveCount
+'
+'   Additional diagnostic / recovery procedures exposed here are:
+'
+'     - PM_TW_IsInstanceActive
+'     - PM_TW_EndAllSessions
+'
+' IMPORT REQUIREMENT
+'   Import this module together with cPerformanceManager.cls.
+'
+' DESIGN
+'   - The first active session captures the original Application baseline.
+'   - Each active instance registers its own disable-mask.
+'   - The effective disable-mask is the OR of all active instance masks.
+'   - Whenever a session begins, updates, or ends, the effective state is
+'     recomputed.
+'   - When the final session ends, the original baseline is restored exactly
+'     once and the shared store is released.
+'
+' DEPENDENCIES
+'   - Excel Application object model
+'   - Late-bound Scripting.Dictionary via CreateObject("Scripting.Dictionary")
+'
+' REFERENCE POLICY
+'   No manual reference to "Microsoft Scripting Runtime" is required.
+'
+' ERROR POLICY
+'   - Public begin/end operations raise errors normally.
+'   - Internal helpers assume a valid Excel host and valid calling flow.
+'   - PM_TW_EndAllSessions is an emergency/recovery helper and also raises
+'     errors normally.
+'   - No silent swallowing is performed in this manager.
+'
+' NOTES
+'   - This module should not appear as a user-runnable macro surface.
+'     Therefore Option Private Module is used.
+'   - Cursor suppression uses xlWait while active to force a deterministic
+'     benchmark-time cursor state and avoid ordinary cursor-state churn during
+'     benchmark runs.
+'
+' VERSION
+'   1.0
+'
+' UPDATED
+'   2026-03-28
+'
+' AUTHOR
+'   Daniele Penza
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' MODULE SETTINGS
+'------------------------------------------------------------------------------
+    Option Explicit         'Force explicit declaration of all variables
+    Option Private Module   'Hide internal support procedures from Macro dialog
+
+'------------------------------------------------------------------------------
+' PRIVATE CONSTANTS
+'------------------------------------------------------------------------------
+    'Known TW mask bits
+        Private Const PM_TW_MASK_NONE   As Long = 0
+        Private Const PM_TW_MASK_SU     As Long = 1
+        Private Const PM_TW_MASK_EE     As Long = 2
+        Private Const PM_TW_MASK_DA     As Long = 4
+        Private Const PM_TW_MASK_CALC   As Long = 8
+        Private Const PM_TW_MASK_CURSOR As Long = 16
+        Private Const PM_TW_MASK_ALL    As Long = 31
+
+'------------------------------------------------------------------------------
+' PRIVATE SHARED STATE
+'------------------------------------------------------------------------------
+    'Dictionary:
+    '   key   = instance key (String)
+    '   item  = disable-mask (Long)
+        Private g_TW_Sessions           As Object
+
+    'TRUE once the baseline Application state has been captured
+        Private g_TW_BaselineSaved      As Boolean
+
+    'Saved baseline Application state
+        Private g_TW_SU                 As Boolean
+        Private g_TW_EE                 As Boolean
+        Private g_TW_DA                 As Boolean
+        Private g_TW_Calc               As Long
+        Private g_TW_Cursor             As Long
+
+
+Public Sub PM_TW_BeginSession( _
+    ByVal InstanceKey As String, _
+    Optional ByVal ExceptMask As Long = 0)
+'
+'==============================================================================
+'                             PM_TW_BEGINSESSION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Starts or updates a shared TW suppression session for one class instance.
+'
+' WHY THIS EXISTS
+'   The calling class cannot safely manage Excel Application TW state
+'   independently because that state is global across the Excel process.
+'   Therefore the class registers its request here and this manager computes the
+'   aggregate effective state across all active instances.
+'
+' INPUTS
+'   InstanceKey
+'     Unique key identifying the calling class instance.
+'
+'   ExceptMask (optional)
+'     Bitmask of TW flags to EXEMPT.
+'     Any flag present in ExceptMask remains at the original baseline state for
+'     this instance's request.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Ensures the shared session store exists.
+'   - Captures the original Application baseline when the first active session
+'     begins.
+'   - Converts the supplied exemption mask into a disable-mask.
+'   - Registers or updates this instance in the shared session store.
+'   - Recomputes and applies the aggregate effective state.
+'
+' ERROR POLICY
+'   Raises errors normally.
+'
+' DEPENDENCIES
+'   - PM_TW_EnsureStore
+'   - PM_TW_SaveBaseline
+'   - PM_TW_DisableMaskFromExcept
+'   - PM_TW_AggregateDisableMask
+'   - PM_TW_ApplyEffectiveState
+'
+' NOTES
+'   This routine is instance-idempotent:
+'     - first call for an instance => begin/register
+'     - later calls for same instance => update requested mask
+'
+' UPDATED
+'   2026-03-28
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Ensure the shared dictionary exists
+        PM_TW_EnsureStore
+
+'------------------------------------------------------------------------------
+' CAPTURE BASELINE (FIRST ACTIVE SESSION ONLY)
+'------------------------------------------------------------------------------
+    'Capture the original Application state only when the first shared session
+    'begins
+        If g_TW_Sessions.Count = 0 Then PM_TW_SaveBaseline
+        
+'------------------------------------------------------------------------------
+' REGISTER / UPDATE INSTANCE MASK
+'------------------------------------------------------------------------------
+    'Store this instance's requested disable-mask
+        g_TW_Sessions(InstanceKey) = PM_TW_DisableMaskFromExcept(ExceptMask)
+
+'------------------------------------------------------------------------------
+' APPLY EFFECTIVE SHARED STATE
+'------------------------------------------------------------------------------
+    'Recompute the aggregate disable-mask and apply it
+        PM_TW_ApplyEffectiveState PM_TW_AggregateDisableMask()
+End Sub
+
+Public Sub PM_TW_EndSession( _
+    ByVal InstanceKey As String)
+'
+'==============================================================================
+'                              PM_TW_ENDSESSION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Ends a shared TW suppression session for one class instance.
+'
+' WHY THIS EXISTS
+'   TW suppression must be removed by deregistering the calling instance from
+'   the shared manager, not by blindly restoring Excel state locally. This keeps
+'   overlapping instances safe and ensures the effective state is recomputed
+'   correctly from the remaining active sessions.
+'
+' INPUTS
+'   InstanceKey
+'     Unique key identifying the calling class instance.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - If no shared store exists, exits immediately.
+'   - Removes the specified instance if present.
+'   - If no sessions remain:
+'       * restores the original baseline exactly once when available
+'       * clears the baseline-saved flag
+'       * releases the shared dictionary
+'   - Otherwise recomputes and reapplies the remaining effective state.
+'
+' ERROR POLICY
+'   Raises errors normally.
+'
+' DEPENDENCIES
+'   - PM_TW_ApplyEffectiveState
+'   - PM_TW_AggregateDisableMask
+'
+' NOTES
+'   This routine is idempotent for unknown/inactive instance keys:
+'     - if the instance is not present, no removal occurs
+'
+' UPDATED
+'   2026-03-28
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' VALIDATE STORE
+'------------------------------------------------------------------------------
+    'If no shared store exists yet, there is nothing to end
+        If g_TW_Sessions Is Nothing Then Exit Sub
+
+'------------------------------------------------------------------------------
+' REMOVE INSTANCE (IF PRESENT)
+'------------------------------------------------------------------------------
+    'Remove the calling instance from the active session set
+        If g_TW_Sessions.Exists(InstanceKey) Then
+            g_TW_Sessions.Remove InstanceKey
+        End If
+
+'------------------------------------------------------------------------------
+' RESTORE OR REAPPLY
+'------------------------------------------------------------------------------
+    'If no sessions remain, restore the original baseline
+        If g_TW_Sessions.Count = 0 Then
+
+            'Restore the original Application state only if a baseline was
+            'actually captured
+                If g_TW_BaselineSaved Then
+                    PM_TW_ApplyEffectiveState PM_TW_MASK_NONE
+                    g_TW_BaselineSaved = False
+                End If
+
+            'Release the dictionary to return to a clean idle state
+                Set g_TW_Sessions = Nothing
+
+            Exit Sub
+        End If
+
+    'Otherwise recompute and apply the remaining aggregate disable-mask
+        PM_TW_ApplyEffectiveState PM_TW_AggregateDisableMask()
+End Sub
+
+Public Function PM_TW_ActiveCount() As Long
+'
+'==============================================================================
+'                             PM_TW_ACTIVECOUNT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns the number of currently active shared TW sessions.
+'
+' WHY THIS EXISTS
+'   Useful for diagnostics, assertions, and visibility when verifying shared TW
+'   lifecycle behavior across multiple cPerformanceManager instances.
+'
+' INPUTS
+'   None.
+'
+' RETURNS
+'   Long
+'     Number of currently active shared TW sessions.
+'
+' BEHAVIOR
+'   - Returns 0 when no shared store currently exists.
+'   - Otherwise returns the dictionary count.
+'
+' ERROR POLICY
+'   Does not raise errors.
+'
+' DEPENDENCIES
+'   - g_TW_Sessions
+'
+' NOTES
+'   This routine does not create the shared store on an idle read path.
+'
+' UPDATED
+'   2026-03-28
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' VALIDATE STORE
+'------------------------------------------------------------------------------
+    'Return 0 when no shared store currently exists
+        If g_TW_Sessions Is Nothing Then
+            PM_TW_ActiveCount = 0
+            Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' ASSIGN RESULT
+'------------------------------------------------------------------------------
+    'Return the active session count
+        PM_TW_ActiveCount = g_TW_Sessions.Count
+End Function
+
+Public Function PM_TW_IsInstanceActive( _
+    ByVal InstanceKey As String) _
+    As Boolean
+'
+'==============================================================================
+'                          PM_TW_ISINSTANCEACTIVE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns TRUE if the specified class instance currently has an active shared
+'   TW session registered in the global manager.
+'
+' WHY THIS EXISTS
+'   Useful for diagnostics, regression testing, and troubleshooting of shared
+'   TW registration/update/end behavior.
+'
+' INPUTS
+'   InstanceKey
+'     Unique key identifying the class instance to inspect.
+'
+' RETURNS
+'   Boolean
+'     TRUE  => the instance is currently registered
+'     FALSE => the instance is not currently registered
+'
+' BEHAVIOR
+'   - Returns FALSE when no shared store currently exists.
+'   - Otherwise queries the dictionary for the supplied key.
+'
+' ERROR POLICY
+'   Does not raise errors.
+'
+' DEPENDENCIES
+'   - g_TW_Sessions
+'
+' NOTES
+'   This routine does not create the shared store on an idle read path.
+'
+' UPDATED
+'   2026-03-28
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' VALIDATE STORE
+'------------------------------------------------------------------------------
+    'Return FALSE when no shared store currently exists
+        If g_TW_Sessions Is Nothing Then
+            PM_TW_IsInstanceActive = False
+            Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' ASSIGN RESULT
+'------------------------------------------------------------------------------
+    'Return instance activity state
+        PM_TW_IsInstanceActive = g_TW_Sessions.Exists(InstanceKey)
+End Function
+
+Public Sub PM_TW_EndAllSessions()
+'
+'==============================================================================
+'                            PM_TW_ENDALLSESSIONS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Emergency/global reset for development, recovery, or test-cleanup scenarios.
+'
+' WHY THIS EXISTS
+'   In normal operation each instance should end only its own session through
+'   PM_TW_EndSession. However, during development, test teardown, or recovery
+'   from interrupted flows it can be useful to force a full shared reset.
+'
+' INPUTS
+'   None.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Restores the original Application baseline when available.
+'   - Clears the baseline-saved flag.
+'   - Releases all shared session bookkeeping.
+'
+' ERROR POLICY
+'   Raises errors normally.
+'
+' DEPENDENCIES
+'   - PM_TW_ApplyEffectiveState
+'
+' NOTES
+'   This is not the normal lifecycle path.
+'   Normal callers should use PM_TW_EndSession for the specific active instance.
+'
+' UPDATED
+'   2026-03-28
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' RESTORE BASELINE (IF AVAILABLE)
+'------------------------------------------------------------------------------
+    'Restore the original Application baseline if available
+        If g_TW_BaselineSaved Then
+            PM_TW_ApplyEffectiveState PM_TW_MASK_NONE
+            g_TW_BaselineSaved = False
+        End If
+
+'------------------------------------------------------------------------------
+' CLEAR SHARED STATE
+'------------------------------------------------------------------------------
+    'Release all active-session bookkeeping
+        Set g_TW_Sessions = Nothing
+End Sub
+
+
+Private Sub PM_TW_EnsureStore()
+'
+'==============================================================================
+'                             PM_TW_ENSURESTORE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Lazily creates the shared session dictionary.
+'
+' WHY THIS EXISTS
+'   The shared TW store should exist only when needed. This helper centralizes
+'   the lazy-creation logic and keeps begin/update paths simple.
+'
+' INPUTS
+'   None.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Creates the shared dictionary only when it does not already exist.
+'   - Uses late binding so no external reference is required.
+'
+' ERROR POLICY
+'   Raises errors normally.
+'
+' DEPENDENCIES
+'   - CreateObject("Scripting.Dictionary")
+'
+' NOTES
+'   Read-only status helpers intentionally avoid calling this routine so that an
+'   idle project remains in a true idle state.
+'
+' UPDATED
+'   2026-03-28
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Create the shared dictionary only once
+        If g_TW_Sessions Is Nothing Then
+            Set g_TW_Sessions = CreateObject("Scripting.Dictionary")
+        End If
+End Sub
+
+Private Sub PM_TW_SaveBaseline()
+'
+'==============================================================================
+'                             PM_TW_SAVEBASELINE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Captures the original Application state before any TW suppression is
+'   applied.
+'
+' WHY THIS EXISTS
+'   Shared TW suppression must restore the exact original Excel baseline when
+'   the final active session ends. Therefore that baseline must be captured once
+'   at the beginning of the first shared session.
+'
+' INPUTS
+'   None.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Reads the current Application state into shared baseline variables.
+'   - Marks the baseline as captured.
+'
+' ERROR POLICY
+'   Raises errors normally.
+'
+' DEPENDENCIES
+'   - Excel Application object model
+'
+' NOTES
+'   This routine should only be called when the first shared session begins.
+'
+' UPDATED
+'   2026-03-28
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' CAPTURE BASELINE
+'------------------------------------------------------------------------------
+    'Read the current Application state into shared baseline variables
+        With Application
+            g_TW_SU = .ScreenUpdating
+            g_TW_EE = .EnableEvents
+            g_TW_DA = .DisplayAlerts
+            g_TW_Calc = .Calculation
+            g_TW_Cursor = .Cursor
+        End With
+
+'------------------------------------------------------------------------------
+' UPDATE STATE
+'------------------------------------------------------------------------------
+    'Mark the baseline as captured
+        g_TW_BaselineSaved = True
+End Sub
+
+Private Function PM_TW_DisableMaskFromExcept( _
+    ByVal ExceptMask As Long) _
+    As Long
+'
+'==============================================================================
+'                        PM_TW_DISABLEMASKFROMEXCEPT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Converts an exemption mask into a disable-mask.
+'
+' WHY THIS EXISTS
+'   Callers express their request as "leave these flags alone." Internally the
+'   shared manager works more naturally with a disable-mask, because aggregate
+'   shared state is computed by OR-ing together every active instance's disabled
+'   flags.
+'
+' INPUTS
+'   ExceptMask
+'     Bitmask of TW flags to exempt.
+'
+' RETURNS
+'   Long
+'     Disable-mask representing the supported flags that should be forced into
+'     their benchmark/performance state.
+'
+' BEHAVIOR
+'   - Clamps the input to known bits.
+'   - Inverts those bits within the supported TW mask universe.
+'
+' ERROR POLICY
+'   Does not raise errors.
+'
+' DEPENDENCIES
+'   - PM_TW_MASK_ALL
+'
+' EXAMPLE
+'   ExceptMask = ScreenUpdating Or EnableEvents
+'   => disable all supported TW flags except those two
+'
+' UPDATED
+'   2026-03-28
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' ASSIGN RESULT
+'------------------------------------------------------------------------------
+    'Clamp to known bits and invert within the supported TW mask set
+        PM_TW_DisableMaskFromExcept = (PM_TW_MASK_ALL And Not ExceptMask)
+End Function
+
+Private Function PM_TW_AggregateDisableMask() As Long
+'
+'==============================================================================
+'                        PM_TW_AGGREGATEDISABLEMASK
+'------------------------------------------------------------------------------
+' PURPOSE
+'   ORs together the disable-masks of all active shared TW sessions.
+'
+' WHY THIS EXISTS
+'   The effective TW state is the union of every currently active instance's
+'   requested disable-mask. This helper centralizes that aggregation.
+'
+' INPUTS
+'   None.
+'
+' RETURNS
+'   Long
+'     Aggregate disable-mask across all active sessions.
+'
+' BEHAVIOR
+'   - Ensures the shared store exists.
+'   - ORs together every active instance's stored disable-mask.
+'   - Returns the final aggregate mask.
+'
+' ERROR POLICY
+'   Raises errors normally.
+'
+' DEPENDENCIES
+'   - PM_TW_EnsureStore
+'   - g_TW_Sessions
+'
+' UPDATED
+'   2026-03-28
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim K    As Variant    'Dictionary key
+    Dim Mask As Long       'Accumulated disable-mask
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Ensure the shared dictionary exists
+        PM_TW_EnsureStore
+
+'------------------------------------------------------------------------------
+' AGGREGATE
+'------------------------------------------------------------------------------
+    'OR together every active instance's disable-mask
+        For Each K In g_TW_Sessions.Keys
+            Mask = (Mask Or CLng(g_TW_Sessions(K)))
+        Next K
+
+'------------------------------------------------------------------------------
+' ASSIGN RESULT
+'------------------------------------------------------------------------------
+    'Return the aggregate disable-mask
+        PM_TW_AggregateDisableMask = Mask
+End Function
+
+Private Sub PM_TW_ApplyEffectiveState( _
+    ByVal DisableMask As Long)
+'
+'==============================================================================
+'                        PM_TW_APPLYEFFECTIVESTATE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Applies the effective shared TW state using:
+'     - the original saved baseline, and
+'     - the aggregate disable-mask of all active sessions.
+'
+' WHY THIS EXISTS
+'   Shared TW control should never restore or force individual flags in an
+'   ad-hoc per-instance way. Instead, each flag must be derived from:
+'
+'     - the original baseline captured at the first session, and
+'     - whether any currently active instance wants that flag disabled.
+'
+' INPUTS
+'   DisableMask
+'     Aggregate disable-mask to apply.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   For each supported flag:
+'     - if disabled by any active session => force benchmark/performance state
+'     - otherwise => restore original baseline state
+'
+' ERROR POLICY
+'   Raises errors normally.
+'
+' DEPENDENCIES
+'   - Excel Application object model
+'   - g_TW_SU
+'   - g_TW_EE
+'   - g_TW_DA
+'   - g_TW_Calc
+'   - g_TW_Cursor
+'
+' NOTES
+'   Cursor uses xlWait when disabled to force a deterministic benchmark-time
+'   cursor state.
+'
+' UPDATED
+'   2026-03-28
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' APPLY EFFECTIVE STATE
+'------------------------------------------------------------------------------
+    'Apply the effective state flag-by-flag
+        With Application
+
+            'ScreenUpdating
+                If (DisableMask And PM_TW_MASK_SU) <> 0 Then
+                    .ScreenUpdating = False
+                Else
+                    .ScreenUpdating = g_TW_SU
+                End If
+
+            'EnableEvents
+                If (DisableMask And PM_TW_MASK_EE) <> 0 Then
+                    .EnableEvents = False
+                Else
+                    .EnableEvents = g_TW_EE
+                End If
+
+            'DisplayAlerts
+                If (DisableMask And PM_TW_MASK_DA) <> 0 Then
+                    .DisplayAlerts = False
+                Else
+                    .DisplayAlerts = g_TW_DA
+                End If
+
+            'Calculation
+                If (DisableMask And PM_TW_MASK_CALC) <> 0 Then
+                    .Calculation = xlCalculationManual
+                Else
+                    .Calculation = g_TW_Calc
+                End If
+
+            'Cursor
+                If (DisableMask And PM_TW_MASK_CURSOR) <> 0 Then
+                    .Cursor = xlWait
+                Else
+                    .Cursor = g_TW_Cursor
+                End If
+
+        End With
+End Sub
+
