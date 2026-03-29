@@ -2,19 +2,19 @@
 
 High-precision timing and benchmark-support utility for VBA on Windows.
 
-`cPerformanceManager` provides a single, session-bound interface for multiple timing backends, human-readable elapsed-time diagnostics, benchmark overhead measurement, pause helpers, and optional shared Excel “time-waster” suppression for cleaner benchmarking.
+`cPerformanceManager` provides a single, session-bound interface for multiple timing backends, numeric elapsed-time measurement, human-readable elapsed-time diagnostics, benchmark overhead measurement, pause helpers, and shared Excel “time-waster” suppression for cleaner benchmark runs.
 
 ---
 
-## Why this exists
+## Overview
 
-VBA's built-in timing options are often not ideal for benchmarking:
+VBA’s built-in timing options are often not ideal for instrumentation and benchmarking:
 
-- `Timer` has limited resolution and rolls over at midnight.
-- `Now()` is wall-clock based and is not ideal as a primary benchmark source.
-- Windows exposes better monotonic and high-resolution counters such as `QueryPerformanceCounter`.
+- `Timer` has limited resolution and rolls over at midnight
+- `Now()` is wall-clock based and is not a preferred monotonic benchmark source
+- Windows exposes better monotonic and high-resolution counters such as `QueryPerformanceCounter`
 
-This class wraps those sources behind a consistent API and adds benchmark-oriented utilities for Excel/VBA work.
+`cPerformanceManager` wraps those timing sources behind a consistent API and adds benchmark-oriented helpers for Excel/VBA projects.
 
 ---
 
@@ -25,9 +25,10 @@ This class wraps those sources behind a consistent API and adds benchmark-orient
 - Low-overhead numeric elapsed-time measurement
 - Human-readable elapsed-time formatting
 - Benchmark overhead measurement helpers
-- Timer/source diagnostics
+- Timing/source diagnostics
 - Pause/wait helpers
-- Optional shared Excel “time-waster” suppression for benchmark runs
+- Shared Excel “time-waster” suppression for benchmark runs
+- Strict-mode validation for safer usage
 
 ---
 
@@ -38,7 +39,7 @@ The class supports the following timing backends:
 | ID | Method | Notes |
 |---:|---|---|
 | 1 | `Timer` | Seconds since midnight; rolls over every 24 hours |
-| 2 | `GetTickCount / GetTickCount64` | Milliseconds since boot; the 32-bit version wraps at about 49.7 days |
+| 2 | `GetTickCount / GetTickCount64` | Milliseconds since boot; 32-bit path wraps at about 49.7 days |
 | 3 | `timeGetTime` | Millisecond counter with 32-bit rollover semantics; can use 1ms timer resolution |
 | 4 | `timeGetSystemTime (MMTIME / TIME_MS)` | Millisecond source treated with 32-bit rollover semantics |
 | 5 | `QueryPerformanceCounter (QPC)` | Default and recommended high-resolution benchmark source |
@@ -48,10 +49,12 @@ The class supports the following timing backends:
 
 ## Requirements
 
-- Microsoft Excel / VBA
-- Windows for API-backed methods (`2..5`)
-- Appropriate `VBA7` / `Win64` conditional compilation support
-- The class file: `cPerformanceManager.cls`
+- Microsoft Excel with VBA enabled
+- Windows host environment for API-backed timing methods (`2..5`)
+- `VBA7` / `Win64` conditional-compilation support as required by the host
+- The following source files:
+  - `cPerformanceManager.cls`
+  - `M_cPM_TimeWasters.bas`
 
 ### Compatibility note
 
@@ -59,26 +62,99 @@ On non-Windows hosts, only `Timer()` / `Now()`-based methods are conceptually po
 
 ---
 
-## External dependency for TW control
+## Required companion module
 
-The class includes shared “time-waster” suppression, but that feature depends on a companion shared manager module exposing these procedures/functions:
+This project includes a required companion standard module:
+
+- `M_cPM_TimeWasters.bas`
+
+That module manages shared Excel Application state for:
+
+- `ScreenUpdating`
+- `EnableEvents`
+- `DisplayAlerts`
+- `Calculation`
+- `Cursor`
+
+The class directly depends on the companion module’s shared manager procedures, so both files must be imported into the same VBA project.
+
+### Required shared procedures
+
+The companion module exposes these procedures/functions used by the class:
 
 - `PM_TW_BeginSession`
 - `PM_TW_EndSession`
 - `PM_TW_ActiveCount`
 
-If you do **not** include that companion module, the core timing features still work, but the TW-related methods will not.
+Additional diagnostic/recovery helpers are also exposed there.
 
 ---
 
 ## Installation
 
-1. Export or copy the class file as `cPerformanceManager.cls`.
-2. Import it into your VBA project:
-   - Open the VBA Editor.
-   - Choose **File -> Import File...**
-3. If you want TW suppression support, also import the companion TW manager module.
-4. Save, compile, and test.
+1. Open the target workbook, add-in, or VBA project.
+2. Open the VBA Editor with `ALT + F11`.
+3. Import the class module:
+   - `File` -> `Import File...`
+   - select `cPerformanceManager.cls`
+4. Import the companion standard module:
+   - `File` -> `Import File...`
+   - select `M_cPM_TimeWasters.bas`
+5. Save the project as a macro-enabled file type such as:
+   - `.xlsm`
+   - `.xlam`
+6. Compile the project:
+   - `Debug` -> `Compile VBAProject`
+7. Run a small smoke test.
+
+---
+
+## Quick start
+
+### Basic timing with default QPC backend
+
+```vb
+Sub Example_BasicTiming()
+
+    Dim cPM As cPerformanceManager
+    Dim ElapsedS As Double
+
+    Set cPM = New cPerformanceManager
+
+    cPM.StartTimer
+
+    Range("A1:A10000").Value = 1
+
+    ElapsedS = cPM.ElapsedSeconds
+
+    Debug.Print "Elapsed seconds: " & Format$(ElapsedS, "0.000000000")
+
+    cPM.ResetEnvironment
+    Set cPM = Nothing
+
+End Sub
+```
+
+### Human-readable elapsed time
+
+```vb
+Sub Example_ElapsedTimeText()
+
+    Dim cPM As cPerformanceManager
+
+    Set cPM = New cPerformanceManager
+
+    cPM.StartTimer 5
+
+    Application.Calculate
+
+    Debug.Print cPM.ElapsedTime
+
+    cPM.ResetEnvironment
+    Set cPM = Nothing
+
+End Sub
+```
 
 ---
 
@@ -123,7 +199,7 @@ If you do **not** include that companion module, the core timing features still 
 
 ---
 
-## Strict mode behavior
+## Strict mode
 
 The class defaults to:
 
@@ -136,107 +212,20 @@ In strict mode, invalid usage raises errors. Examples include:
 - invalid timer method values
 - calling `ElapsedSeconds` before `StartTimer`
 - trying to read elapsed time with a method different from the active session method
-- requesting QPC when unavailable
+- requesting `QPC` when unavailable
 
 In non-strict mode, the class falls back where possible.
 
 ---
 
-## Basic usage
+## Time-waster suppression
 
-### 1. Default timing with QPC
+The class can suppress selected Excel-side overhead during benchmark runs by coordinating shared Application state through the companion module.
 
-```vb
-Sub Example_BasicTiming()
-
-    Dim cPM         As cPerformanceManager
-    Dim ElapsedS    As Double
-
-    Set cPM = New cPerformanceManager
-
-    cPM.StartTimer
-
-    Range("A1:A10000").Value = 1
-
-    ElapsedS = cPM.ElapsedSeconds
-
-    Debug.Print "Elapsed seconds: " & Format$(ElapsedS, "0.000000000")
-
-    cPM.ResetEnvironment
-    Set cPM = Nothing
-
-End Sub
-```
-
-### 2. Human-readable elapsed time
+### Disable all supported time-wasters
 
 ```vb
-Sub Example_ElapsedTimeText()
-
-    Dim cPM As cPerformanceManager
-
-    Set cPM = New cPerformanceManager
-
-    cPM.StartTimer 5
-
-    Application.Calculate
-
-    Debug.Print cPM.ElapsedTime
-
-    cPM.ResetEnvironment
-    Set cPM = Nothing
-
-End Sub
-```
-
-### 3. Specific timing backend
-
-```vb
-Sub Example_SpecificMethod()
-
-    Dim cPM As cPerformanceManager
-
-    Set cPM = New cPerformanceManager
-
-    cPM.StartTimer 2
-
-    Worksheets(1).Range("A1").Formula = "=RAND()"
-
-    Debug.Print "Method used: " & cPM.MethodName(cPM.ActiveMethodID)
-    Debug.Print "Elapsed seconds: " & Format$(cPM.ElapsedSeconds, "0.000000000")
-
-    cPM.ResetEnvironment
-    Set cPM = Nothing
-
-End Sub
-```
-
-### 4. Aligned start
-
-```vb
-Sub Example_AlignedStart()
-
-    Dim cPM As cPerformanceManager
-
-    Set cPM = New cPerformanceManager
-
-    cPM.StartTimer 5, True
-
-    DoEvents
-
-    Debug.Print "Aligned elapsed seconds: " & _
-                Format$(cPM.ElapsedSeconds, "0.000000000")
-
-    cPM.ResetEnvironment
-    Set cPM = Nothing
-
-End Sub
-```
-
-### 5. TW suppression during a benchmark
-
-```vb
-Sub Example_TimeWasters()
+Sub Example_TW_AllOff()
 
     Dim cPM As cPerformanceManager
 
@@ -256,7 +245,32 @@ Sub Example_TimeWasters()
 End Sub
 ```
 
-### 6. Safe cleanup pattern
+### Disable with exemptions
+
+```vb
+Sub Example_TW_WithExceptions()
+
+    Dim cPM As cPerformanceManager
+
+    Set cPM = New cPerformanceManager
+
+    cPM.TW_Turn_OFF TW_Enum.ScreenUpdating Or TW_Enum.EnableEvents
+    cPM.StartTimer 5
+
+    Application.CalculateFull
+
+    Debug.Print cPM.ElapsedTime
+
+    cPM.TW_Turn_ON
+    cPM.ResetEnvironment
+    Set cPM = Nothing
+
+End Sub
+```
+
+---
+
+## Safe cleanup pattern
 
 ```vb
 Sub Example_SafePattern()
@@ -296,8 +310,8 @@ End Sub
 
 Timing is session-bound:
 
-- `StartTimer` establishes the active timing backend.
-- `ElapsedSeconds` and `ElapsedTime` are validated against that same backend.
+- `StartTimer` establishes the active timing backend
+- `ElapsedSeconds` and `ElapsedTime` are validated against that same backend
 
 This helps prevent accidental cross-method timing mistakes.
 
@@ -345,8 +359,9 @@ Sub Example_Diagnostics()
     Set cPM = Nothing
 
 End Sub
-
 ```
+
+---
 
 ## Benchmark guidance
 
@@ -363,7 +378,8 @@ For most benchmark scenarios:
 ## Limitations
 
 - Primarily designed for Windows/VBA
-- TW support requires a companion shared manager module
+- API-backed methods are not intended for non-Windows hosts
+- Shared TW control requires the companion module
 - `Now()` is not a preferred monotonic benchmark source
 - `Application.Wait` is coarse and not suitable for fine-grained timing
 - “Nanoseconds” in formatted output are display precision, not guaranteed measurement resolution
@@ -374,6 +390,8 @@ For most benchmark scenarios:
 
 Daniele Penza
 
+---
+
 ## Version
 
-1.0.0
+1.0
