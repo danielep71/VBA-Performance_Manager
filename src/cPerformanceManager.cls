@@ -1607,8 +1607,8 @@ Public Sub Pause( _
 '   supported waiting mechanisms.
 '
 ' WHY THIS EXISTS
-'   This routine provides a small, centralized pause utility with multiple
-'   waiting strategies so callers can choose between lower overhead, better UI
+'   This routine provides a centralized pause utility with multiple waiting
+'   strategies so callers can choose between lower overhead, better UI
 '   responsiveness, and simpler blocking behavior.
 '
 ' INPUTS
@@ -1621,8 +1621,8 @@ Public Sub Pause( _
 '     Selects the pause mechanism:
 '       1 => Sleep API (kernel32) (millisecond granularity; no DoEvents)
 '       2 => Timer + DoEvents loop (coarser; yields to Excel/UI)
-'       3 => Application.Wait (coarse; blocks VBA while waiting)
-'       Else => Now + DoEvents loop (yields; Date-based resolution)
+'       3 => Application.Wait for coarse waiting + Timer guard
+'       Else => Now + DoEvents loop + Timer guard
 '
 ' RETURNS
 '   None.
@@ -1630,10 +1630,11 @@ Public Sub Pause( _
 ' BEHAVIOR
 '   - Method 1 is the lowest-overhead pause mechanism and does not call
 '     DoEvents.
-'   - Methods 2 and Else yield via DoEvents, which improves UI responsiveness
-'     but introduces additional overhead and possible re-entrancy side effects.
-'   - Method 3 uses Application.Wait, which is simple and deterministic but not
-'     suitable for fine-grained pause precision.
+'   - Method 2 uses Timer() delta logic and yields via DoEvents.
+'   - Method 3 uses Application.Wait as the coarse wait engine, then applies a
+'     Timer()-based guard loop so the total pause cannot undershoot.
+'   - Method 4 (Else) preserves a Date/Now-flavored yielding loop, but also
+'     applies a Timer()-based guard loop so the total pause cannot undershoot.
 '
 ' ERROR POLICY
 '   Invalid, non-positive, or excessively large pause durations are treated as
@@ -1649,31 +1650,42 @@ Public Sub Pause( _
 ' NOTES
 '   - Method 2 is midnight-safe because it measures elapsed delta rather than
 '     comparing Timer() against an absolute target.
-'   - Method 3 and the Else branch are Date-based and therefore inherit the
-'     practical precision limits of VBA Date/Now and Excel scheduling behavior.
-'   - This routine uses a local elapsed-time variable and does not overwrite the
+'   - Methods 3 and 4 use a Timer()-based guard loop specifically because
+'     Application.Wait and Now are too coarse to guarantee a 1-second pause
+'     accurately on their own.
+'   - This routine uses local elapsed-time variables and does not overwrite the
 '     class-level m_ET timing cache.
 '
 ' UPDATED
-'   2026-03-28
+'   2026-03-30
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim PauseTime   As Double   'Requested pause duration in seconds (method 2)
-    Dim StartS      As Double   'Timer() snapshot at start (method 2)
-    Dim ElapsedS    As Double   'Elapsed seconds since StartS (method 2)
-    Dim WaitTill    As Date     'Target timestamp for Wait/Now loops (methods 3/Else)
+    Dim PauseTime   As Double   'Requested pause duration in seconds
+    Dim StartS      As Double   'Timer() snapshot at pause start
+    Dim ElapsedS    As Double   'Elapsed seconds since StartS
+    Dim WaitTill    As Date     'Target timestamp for coarse Date/Wait paths
     Dim Ms          As Long     'Milliseconds for Sleep (method 1)
+    Dim WholeS      As Long     'Whole-second coarse-wait portion (method 3)
+    Dim FracS       As Double   'Fractional remainder after whole seconds (method 3)
+    Dim K           As Long     'Loop counter for repeated Wait calls (method 3)
 
 '------------------------------------------------------------------------------
 ' VALIDATE / CONTROL
 '------------------------------------------------------------------------------
     'Reject non-positive pauses (no-op)
         If dSeconds <= 0# Then Exit Sub
+
     'Hard cap to avoid accidental long blocking pauses
         If dSeconds > 3600# Then Exit Sub
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Persist the requested pause duration locally
+        PauseTime = dSeconds
 
 '------------------------------------------------------------------------------
 ' DISPATCH
@@ -1682,38 +1694,93 @@ Public Sub Pause( _
 
         Case 1
             'Sleep takes milliseconds; coerce seconds to Long milliseconds
-                Ms = CLng(dSeconds * 1000#)
+                Ms = CLng(PauseTime * 1000#)
+
             'Sleep(0) yields the remainder of the thread's timeslice; allow it explicitly
                 Sleep Ms
 
         Case 2
-            'Use elapsed-delta logic so Timer() remains safe across midnight rollover
-                PauseTime = dSeconds
+            'Capture the Timer() start snapshot
                 StartS = Timer
+
             'Loop until the requested pause duration has elapsed
                 Do
                     'Compute elapsed seconds since the start snapshot
                         ElapsedS = Timer - StartS
+
                     'Correct midnight rollover when Timer() wraps at 24 hours
                         If ElapsedS < 0# Then ElapsedS = ElapsedS + 86400#
+
                     'Exit once the requested pause duration has been reached
                         If ElapsedS >= PauseTime Then Exit Do
+
                     'Yield to Excel/UI while waiting
                         DoEvents
                 Loop
 
         Case 3
-            'Application.Wait is coarse-grained; compute the target timestamp as a Date
-                WaitTill = Now + (dSeconds / 86400#)
-            'Block until the target time is reached
-                Application.Wait WaitTill
+            'Application.Wait is coarse and second-based, so use it only for the
+            'whole-second portion and then finish with a Timer()-based guard loop
+                WholeS = CLng(Fix(PauseTime))
+                FracS = PauseTime - CDbl(WholeS)
+
+            'Capture the Timer() start snapshot so we can guarantee the total
+            'requested elapsed time even if Application.Wait undershoots
+                StartS = Timer
+
+            'Apply the coarse whole-second wait portion using repeated 1-second
+            'Application.Wait calls
+                For K = 1 To WholeS
+                    Application.Wait Now + TimeSerial(0, 0, 1)
+                Next K
+
+            'If there is no whole-second portion, do nothing here and let the
+            'Timer()-based guard handle the entire requested delay
+                If FracS < 0# Then FracS = 0#
+
+            'Guard against undershoot using Timer() delta logic
+                Do
+                    'Compute elapsed seconds since the pause started
+                        ElapsedS = Timer - StartS
+
+                    'Correct midnight rollover when Timer() wraps at 24 hours
+                        If ElapsedS < 0# Then ElapsedS = ElapsedS + 86400#
+
+                    'Exit once the total requested pause duration has been reached
+                        If ElapsedS >= PauseTime Then Exit Do
+
+                    'Yield to Excel/UI while waiting
+                        DoEvents
+                Loop
 
         Case Else
-            'Use a Date-based loop with DoEvents; simpler but typically higher overhead
-                WaitTill = Now + (dSeconds / 86400#)
-            'Yield repeatedly until the target timestamp is reached
+            'Preserve the Date/Now-flavored yielding path, but add a Timer()-based
+            'guard loop because Now is too coarse to guarantee the requested pause
+            'duration accurately by itself
+                WaitTill = Now + (PauseTime / 86400#)
+
+            'Capture the Timer() start snapshot so we can enforce the true
+            'requested pause duration
+                StartS = Timer
+
+            'Run the coarse Date-based yielding loop first
                 Do While Now < WaitTill
                     DoEvents
+                Loop
+
+            'Guard against undershoot using Timer() delta logic
+                Do
+                    'Compute elapsed seconds since the pause started
+                        ElapsedS = Timer - StartS
+
+                    'Correct midnight rollover when Timer() wraps at 24 hours
+                        If ElapsedS < 0# Then ElapsedS = ElapsedS + 86400#
+
+                    'Exit once the total requested pause duration has been reached
+                        If ElapsedS >= PauseTime Then Exit Do
+
+                    'Yield to Excel/UI while waiting
+                        DoEvents
                 Loop
 
     End Select
