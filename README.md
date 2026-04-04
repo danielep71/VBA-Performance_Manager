@@ -18,6 +18,38 @@ VBA’s built-in timing options are often not ideal for instrumentation and benc
 
 ---
 
+## Repository Contents
+
+```text
+/README.md
+/src/cPerformanceManager.cls
+/src/M_cPM_TimeWasters.bas
+/examples/M_cPM_Examples.bas
+/test/M_cPM_Test.bas
+```
+
+### Required files
+
+These two files are required for normal use:
+
+- `src/cPerformanceManager.cls`
+- `src/M_cPM_TimeWasters.bas`
+
+### Optional companion files
+
+These files are optional but strongly recommended:
+
+- `examples/M_cPM_Examples.bas`
+  - example and launcher routines
+  - practical usage patterns
+  - small smoke-test style demonstrations
+
+- `test/M_cPM_Test.bas`
+  - regression-test harness
+  - public validation entry point for repository testing
+
+---
+
 ## Features
 
 - Multiple timing methods under one interface
@@ -32,7 +64,7 @@ VBA’s built-in timing options are often not ideal for instrumentation and benc
 
 ---
 
-## Timer methods
+## Timer Methods
 
 The class supports the following timing backends:
 
@@ -52,23 +84,23 @@ The class supports the following timing backends:
 - Microsoft Excel with VBA enabled
 - Windows host environment for API-backed timing methods (`2..5`)
 - `VBA7` / `Win64` conditional-compilation support as required by the host
-- The following source files:
+- The following required source files:
   - `cPerformanceManager.cls`
   - `M_cPM_TimeWasters.bas`
 
-### Compatibility note
+### Compatibility Note
 
 On non-Windows hosts, only `Timer()` / `Now()`-based methods are conceptually portable, if retained.
 
 ---
 
-## Required companion module
+## Required Companion Module
 
 This project includes a required companion standard module:
 
 - `M_cPM_TimeWasters.bas`
 
-That module manages shared Excel Application state for:
+That module manages shared Excel `Application` state for:
 
 - `ScreenUpdating`
 - `EnableEvents`
@@ -76,7 +108,7 @@ That module manages shared Excel Application state for:
 - `Calculation`
 - `Cursor`
 
-The class directly depends on the companion module’s shared manager procedures, so both files must be imported into the same VBA project.
+The class directly depends on the companion module’s shared manager procedures, so both required files must be imported into the same VBA project.
 
 ### Required shared procedures
 
@@ -86,11 +118,13 @@ The companion module exposes these procedures/functions used by the class:
 - `PM_TW_EndSession`
 - `PM_TW_ActiveCount`
 
-Additional diagnostic/recovery helpers are also exposed there.
+Additional diagnostic and recovery helpers are also exposed there.
 
 ---
 
 ## Installation
+
+### Core installation
 
 1. Open the target workbook, add-in, or VBA project.
 2. Open the VBA Editor with `ALT + F11`.
@@ -107,9 +141,16 @@ Additional diagnostic/recovery helpers are also exposed there.
    - `Debug` -> `Compile VBAProject`
 7. Run a small smoke test.
 
+### Optional installation
+
+If you want repository examples and the test harness as well, also import:
+
+- `M_cPM_Examples.bas`
+- `M_cPM_Test.bas`
+
 ---
 
-## Quick start
+## Quick Start
 
 ### Basic timing with default QPC backend
 
@@ -146,9 +187,9 @@ Sub Example_ElapsedTimeText()
 
     cPM.StartTimer 5
 
-    Application.Calculate
+    cPM.PauseSeconds 1.25
 
-    Debug.Print cPM.ElapsedTime
+    Debug.Print cPM.ElapsedTimeText
 
     cPM.ResetEnvironment
     Set cPM = Nothing
@@ -156,112 +197,25 @@ Sub Example_ElapsedTimeText()
 End Sub
 ```
 
----
-
-## Public API
-
-### Core timing
-
-- `StartTimer(Optional ByVal iMethod As Integer = 5, Optional ByVal AlignToNextTick As Boolean = False)`
-- `ElapsedSeconds(Optional ByVal iMethod As Integer = 0) As Double`
-- `ElapsedTime(Optional ByVal iMethod As Integer = 0) As String`
-
-### Session / state inspection
-
-- `T1 As Double`
-- `T2 As Double`
-- `ET As Double`
-- `StrictMode As Boolean`
-- `ActiveMethodID As Integer`
-- `HasActiveSession As Boolean`
-- `MethodName(ByVal Idx As Integer) As String`
-
-### Diagnostics / benchmark helpers
-
-- `OverheadMeasurement_Seconds(Optional ByVal iMethod As Integer = 5, Optional ByVal Iterations As Long = 1000) As Double`
-- `OverheadMeasurement_Text(Optional ByVal iMethod As Integer = 5) As String`
-- `Get_SystemTickInterval As String`
-- `QPC_Get_SystemTickInterval As String`
-- `QPC_FrequencyPerSecond As String`
-- `QPC_FrequencyPerSecond_Value As Double`
-
-### Execution control / environment
-
-- `Pause(ByVal dSeconds As Double, Optional ByVal iMethod As Integer = 1)`
-- `ResetEnvironment()`
-
-### Shared time-waster control
-
-- `TW_Turn_OFF(Optional ByVal Except As TW_Enum = TW_Enum.None)`
-- `TW_Turn_ON()`
-- `TW_IsActive As Boolean`
-- `TW_ActiveSessionCount As Long`
-
----
-
-## Strict mode
-
-The class defaults to:
+### Benchmark run with time-waster suppression
 
 ```vb
-cPM.StrictMode = True
-```
-
-In strict mode, invalid usage raises errors. Examples include:
-
-- invalid timer method values
-- calling `ElapsedSeconds` before `StartTimer`
-- trying to read elapsed time with a method different from the active session method
-- requesting `QPC` when unavailable
-
-In non-strict mode, the class falls back where possible.
-
----
-
-## Time-waster suppression
-
-The class can suppress selected Excel-side overhead during benchmark runs by coordinating shared Application state through the companion module.
-
-### Disable all supported time-wasters
-
-```vb
-Sub Example_TW_AllOff()
+Sub Example_BenchmarkWithSuppression()
 
     Dim cPM As cPerformanceManager
+    Dim ElapsedS As Double
 
     Set cPM = New cPerformanceManager
 
-    cPM.TW_Turn_OFF
     cPM.StartTimer 5
+    cPM.SuspendTimeWasters
 
     Range("A1:A50000").Formula = "=ROW()"
 
-    Debug.Print cPM.ElapsedSeconds
+    ElapsedS = cPM.ElapsedSeconds
 
-    cPM.TW_Turn_ON
-    cPM.ResetEnvironment
-    Set cPM = Nothing
+    Debug.Print "Elapsed seconds: " & Format$(ElapsedS, "0.000000000")
 
-End Sub
-```
-
-### Disable with exemptions
-
-```vb
-Sub Example_TW_WithExceptions()
-
-    Dim cPM As cPerformanceManager
-
-    Set cPM = New cPerformanceManager
-
-    cPM.TW_Turn_OFF TW_Enum.ScreenUpdating Or TW_Enum.EnableEvents
-    cPM.StartTimer 5
-
-    Application.CalculateFull
-
-    Debug.Print cPM.ElapsedTime
-
-    cPM.TW_Turn_ON
     cPM.ResetEnvironment
     Set cPM = Nothing
 
@@ -270,128 +224,150 @@ End Sub
 
 ---
 
-## Safe cleanup pattern
+## Public API Summary
 
-```vb
-Sub Example_SafePattern()
+Representative public members include:
 
-    Dim cPM As cPerformanceManager
+- timer lifecycle:
+  - `StartTimer`
+  - `RestartTimer`
+  - `ResetTimer`
 
-    On Error GoTo CleanFail
+- elapsed-time access:
+  - `ElapsedSeconds`
+  - `ElapsedMilliseconds`
+  - `ElapsedMicroseconds`
+  - `ElapsedTicks`
+  - `ElapsedTimeText`
 
-    Set cPM = New cPerformanceManager
+- diagnostics / metadata:
+  - `MethodID`
+  - `MethodName`
+  - `Frequency`
+  - `IsRunning`
 
-    cPM.TW_Turn_OFF
-    cPM.StartTimer 5
+- benchmark helpers:
+  - overhead measurement helpers
+  - pause / wait helpers
 
-    Worksheets(1).UsedRange.Calculate
+- environment control:
+  - time-waster suppression helpers
+  - environment reset helpers
 
-    Debug.Print "Elapsed: " & cPM.ElapsedTime
-
-CleanExit:
-    If Not cPM Is Nothing Then
-        cPM.ResetEnvironment
-        Set cPM = Nothing
-    End If
-    Exit Sub
-
-CleanFail:
-    Debug.Print "Error " & Err.Number & " - " & Err.Description
-    Resume CleanExit
-
-End Sub
-```
+Refer to the class source and wiki for the full contract and procedure-level behavior.
 
 ---
 
-## Timing design notes
+## Strict Mode
+
+The class supports stricter validation behavior to reduce misuse in benchmark scenarios.
+
+Typical uses include:
+
+- enforcing correct timer lifecycle
+- detecting invalid method requests earlier
+- making caller mistakes more obvious during development
+
+Use strict mode when correctness is more important than permissive convenience.
+
+---
+
+## Examples Module
+
+`examples/M_cPM_Examples.bas` provides runnable examples and utility launchers.
+
+Use it when you want:
+
+- a practical starting point
+- smoke-test style demonstrations
+- example calling patterns for common timing scenarios
+
+This module is not required for production use, but it is useful for onboarding and repository exploration.
+
+---
+
+## Regression Tests
+
+`test/M_cPM_Test.bas` provides the regression-test harness for the repository.
+
+Use it when you want to validate the behavior of the class after refactoring or packaging changes.
+
+Recommended workflow:
+
+1. import the required core files
+2. import `M_cPM_Test.bas`
+3. run the public regression entry point exposed by the test module
+4. review the Immediate Window output and any assertion failures
+
+---
+
+## Design Notes
 
 ### Session-bound model
 
-Timing is session-bound:
+The class is designed around a session-bound timing model rather than a purely stateless collection of helper functions. This supports:
 
-- `StartTimer` establishes the active timing backend
-- `ElapsedSeconds` and `ElapsedTime` are validated against that same backend
+- consistent elapsed-time queries
+- benchmark-oriented lifecycle handling
+- environment suppression sessions
 
-This helps prevent accidental cross-method timing mistakes.
+### Shared time-waster suppression
 
-### QPC storage
+Excel benchmark runs often benefit from temporarily suppressing costly `Application` behaviors. The companion module centralizes that shared state so nested or repeated benchmark use remains safer and easier to unwind.
 
-QPC ticks and frequency are stored as `Currency` to preserve stable tick precision while remaining efficient in VBA.
+### Windows-backed timing
 
-### Rollover handling
-
-The class includes rollover-aware logic for:
-
-- `Timer`
-- `GetTickCount` (32-bit path)
-- `timeGetTime`
-- `timeGetSystemTime`
-
-### Multimedia timer resolution
-
-Method `3` may enable `timeBeginPeriod(1)` to request 1ms timer resolution. This affects system timer resolution globally and can increase power usage. The class balances that through `ResetEnvironment`, with `Class_Terminate` as a fallback safety net.
-
----
-
-## Diagnostics
-
-The class exposes diagnostics to inspect the timing environment:
-
-- nominal system tick interval
-- QPC tick interval
-- QPC frequency
-- measurement overhead estimate
-
-```vb
-Sub Example_Diagnostics()
-
-    Dim cPM As cPerformanceManager
-
-    Set cPM = New cPerformanceManager
-
-    Debug.Print cPM.Get_SystemTickInterval
-    Debug.Print cPM.QPC_Get_SystemTickInterval
-    Debug.Print cPM.QPC_FrequencyPerSecond
-    Debug.Print cPM.QPC_FrequencyPerSecond_Value
-
-    cPM.ResetEnvironment
-    Set cPM = Nothing
-
-End Sub
-```
-
----
-
-## Benchmark guidance
-
-For most benchmark scenarios:
-
-- prefer `ElapsedSeconds()` for numeric measurement
-- prefer method `5` (`QPC`) for the primary benchmark path
-- use `ElapsedTime()` for presentation and logging
-- use `AlignToNextTick := True` only when the extra polling cost is justified
-- use TW suppression only when you explicitly want to reduce Excel-side noise
+The most accurate and useful benchmark methods depend on Windows timing APIs. In practice, `QueryPerformanceCounter` is the preferred default for serious timing work.
 
 ---
 
 ## Limitations
 
-- Primarily designed for Windows/VBA
-- API-backed methods are not intended for non-Windows hosts
-- Shared TW control requires the companion module
-- `Now()` is not a preferred monotonic benchmark source
-- `Application.Wait` is coarse and not suitable for fine-grained timing
-- “Nanoseconds” in formatted output are display precision, not guaranteed measurement resolution
+- Primarily intended for Windows-hosted Excel/VBA environments
+- API-backed methods depend on the host and its available Windows timing services
+- Some timing methods have rollover semantics by design
+- `Now()` is provided mainly for diagnostics, not as the preferred benchmark source
+- Shared Excel environment suppression should always be reset cleanly after use
 
 ---
 
-## Author
+## Suggested Use Cases
 
-Daniele Penza
+- benchmarking worksheet writes / reads
+- comparing VBA implementations
+- timing UDF or macro pipelines
+- measuring Excel automation overhead
+- controlled benchmark runs with reduced UI / event noise
+- diagnostic timing during development
 
 ---
 
-## Version
+## Documentation
 
-1.0
+In addition to this README, the repository includes a GitHub Wiki with deeper documentation on:
+
+- installation
+- quick start
+- timer methods
+- core API
+- diagnostics
+- execution control
+- strict mode
+- testing
+- architecture
+- limitations
+- version history
+
+---
+
+## License
+
+MIT License.
+
+See `LICENSE` for details.
+
+---
+
+## Status
+
+This repository is intended as a reusable VBA utility component for high-precision timing and benchmark-support scenarios in Excel on Windows.
