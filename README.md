@@ -45,7 +45,7 @@ These files are optional but useful:
 
 - `examples/M_cPM_USAGE_EXAMPLES.bas`
   - compact usage examples and recommended integration patterns
-- `test/M_cPM_test.bas`
+- `test/M_cPM_TEST.bas`
   - regression test harness
 
 ---
