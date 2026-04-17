@@ -17,6 +17,7 @@ Attribute VB_Exposed = False
 '     - multiple timing backends under a session-bound interface
 '     - low-overhead numeric elapsed-time measurement
 '     - human-readable elapsed-time diagnostics
+'     - optional formatting of an already measured elapsed-seconds value
 '     - optional shared Excel "time-waster" suppression for benchmark runs
 '
 ' WHY THIS EXISTS
@@ -62,8 +63,10 @@ Attribute VB_Exposed = False
 ' PERFORMANCE GUIDANCE
 '   - Prefer ElapsedSeconds() for low-overhead numeric measurement.
 '   - Prefer method 5 (QPC) for the primary benchmark path.
-'   - ElapsedTime() is presentation-oriented and intentionally heavier because
-'     it formats a human-readable duration string.
+'   - ElapsedTime() is presentation-oriented:
+'       * when called without ElapsedSecondsIn, it measures and formats
+'       * when called with ElapsedSecondsIn, it formats an existing value
+'         without taking a second timing sample
 '   - AlignToNextTick is benchmark-specific and should be used only when its
 '     extra polling overhead is justified.
 '
@@ -82,12 +85,12 @@ Attribute VB_Exposed = False
 '     overlapping instances can coexist without corrupting Application state.
 '
 ' UPDATED
-'   2026-03-28
+'   2026-04-15
 '
 ' AUTHOR
 '   Daniele Penza
 '
-' VERSION: 1.0.1
+' VERSION: 1.1.0
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -405,8 +408,8 @@ Private Sub Class_Initialize()
 '------------------------------------------------------------------------------
     'Method 1: VBA Timer()
         m_MethodName(1) = "Timer"
-    'Method 2: kernel32 GetTickCount/GetTickCount64
-        m_MethodName(2) = "GetTickCount"
+    'Method 2: kernel32 GetTickCount / GetTickCount64
+        m_MethodName(2) = "GetTickCount / GetTickCount64"
     'Method 3: winmm timeGetTime
         m_MethodName(3) = "timeGetTime"
     'Method 4: winmm timeGetSystemTime
@@ -541,7 +544,7 @@ Public Sub StartTimer(Optional ByVal iMethod As Integer = 5, _
 '
 ' DEPENDENCIES
 '   - Method_NormalizeStart
-'   - QPC_Get_NextTimestampSeconds
+'   - QPC_Get_NextTimestampTick
 '   - QueryPerformanceCounter
 '   - Get_NextTimestampSeconds
 '   - Get_CurrentTimestampSeconds
@@ -583,7 +586,7 @@ Public Sub StartTimer(Optional ByVal iMethod As Integer = 5, _
         If iMethod = 5 Then
             'Optionally align to the next observable QPC tick
                 If AlignToNextTick Then
-                    m_qpcStart = QPC_Get_NextTimestampSeconds
+                    m_qpcStart = QPC_Get_NextTimestampTick
                 Else
                     QueryPerformanceCounter m_qpcStart
                 End If
@@ -771,8 +774,9 @@ Public Property Get ElapsedSeconds(Optional ByVal iMethod As Integer = 0) As Dou
     End Select
 End Property
 
-Public Property Get ElapsedTime( _
-    Optional ByVal iMethod As Integer = 0) _
+Public Function ElapsedTime( _
+    Optional ByVal iMethod As Integer = 0, _
+    Optional ByVal ElapsedSecondsIn As Variant) _
     As String
 '
 '==============================================================================
@@ -780,69 +784,91 @@ Public Property Get ElapsedTime( _
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns a human-readable elapsed time string:
-'     "H:nn:ss - mmm milliseconds - uuu microseconds - nnn nanoseconds"
+'     H:nn:ss - mmm milliseconds - uuu microseconds - nnn nanoseconds
 '
 ' WHY THIS EXISTS
-'   This is the presentation-oriented companion to ElapsedSeconds().
-'   Use ElapsedSeconds() for instrumentation and benchmarking logic; use
-'   ElapsedTime() for diagnostics, printing, logs, or user-facing inspection.
+'   This routine supports two related use cases:
+'
+'     - when no numeric elapsed value is supplied, it measures elapsed time
+'       through ElapsedSeconds()
+'
+'     - when a numeric elapsed value is already available, it formats that
+'       value directly without taking a second timing sample
+'
+'   This avoids the double-measurement problem in callers that already captured
+'   ElapsedSeconds() separately for logging or further numeric processing
 '
 ' INPUTS
 '   iMethod (optional)
 '     0   => use the active timer session method
 '     1-6 => explicit method to validate against the active session
 '
+'   ElapsedSecondsIn (optional)
+'     Optional numeric elapsed-seconds value to format directly
+'
 ' RETURNS
 '   String
-'     The formatted elapsed time string.
+'     The formatted elapsed time string
 '
 ' BEHAVIOR
-'   - Calls ElapsedSeconds() to obtain the numeric elapsed value.
-'   - Splits elapsed time into whole seconds and fractional seconds.
+'   - If ElapsedSecondsIn is omitted, measures elapsed time through
+'     ElapsedSeconds(iMethod)
+'   - If ElapsedSecondsIn is supplied, formats that value directly
+'   - Splits elapsed time into whole seconds and fractional seconds
 '   - Decomposes the fractional part into millisecond / microsecond /
-'     nanosecond display groups.
-'   - Formats the whole-second duration manually so hours do not wrap at 24.
+'     nanosecond display groups
+'   - Formats the whole-second duration manually so hours do not wrap at 24
 '
 ' ERROR POLICY
-'   Delegates timer/session validation to ElapsedSeconds().
+'   Delegates timer/session validation to ElapsedSeconds() when measurement is
+'   requested
 '
 ' DEPENDENCIES
-'   - ElapsedSeconds
+'   - ElapsedSeconds (only when ElapsedSecondsIn is omitted)
 '
 ' NOTES
-'   - Sub-second formatting is derived from the fractional seconds returned by
-'     ElapsedSeconds() and is therefore limited by the true resolution of the
-'     underlying timing backend.
-'   - Nanosecond display here is presentation precision, not a guarantee of
-'     actual nanosecond measurement resolution.
-'   - Fractional values are floored rather than rounded for deterministic output.
+'   - Nanosecond output is presentation precision only and does not imply actual
+'     measurement resolution
+'   - When ElapsedSecondsIn is supplied, no new timing sample is taken
 '
 ' UPDATED
-'   2026-03-28
+'   2026-04-15
 '==============================================================================
-
+    
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Sec         As Double   'Total elapsed seconds from ElapsedSeconds()
+    Dim Sec         As Double   'Elapsed seconds to format
     Dim WholeS      As Long     'Whole seconds component (floor)
     Dim Frac        As Double   'Fractional seconds component in [0,1)
-    Dim NS_Total    As Long     'Fractional part scaled to nanoseconds (floored)
-    Dim Ms          As Long     'Milliseconds component (0..999 for display)
-    Dim Us          As Long     'Microseconds component (0..999 for display)
-    Dim NN          As Long     'Nanoseconds component (0..999 for display)
+    Dim NS_Total    As Long     'Fractional part scaled to nanoseconds
+    Dim Ms          As Long     'Milliseconds component
+    Dim Us          As Long     'Microseconds component
+    Dim NN          As Long     'Nanoseconds component
     Dim Hours       As Long     'Whole hours in the elapsed duration
-    Dim Minutes     As Long     'Minute component (0..59)
-    Dim Seconds     As Long     'Second component (0..59)
+    Dim Minutes     As Long     'Minute component
+    Dim Seconds     As Long     'Second component
     Dim sMS         As String   'Zero-padded milliseconds text
     Dim sUS         As String   'Zero-padded microseconds text
     Dim sNN         As String   'Zero-padded nanoseconds text
 
 '------------------------------------------------------------------------------
-' INITIALIZE
+' RESOLVE ELAPSED SECONDS TO FORMAT
 '------------------------------------------------------------------------------
-    'Fetch numeric elapsed seconds
-        Sec = ElapsedSeconds(iMethod)
+    'Use the supplied elapsed-seconds value when provided
+        If Not IsMissing(ElapsedSecondsIn) Then
+            Sec = CDbl(ElapsedSecondsIn)
+    
+    'Otherwise measure elapsed seconds now
+        Else
+            Sec = ElapsedSeconds(iMethod)
+        End If
+
+'------------------------------------------------------------------------------
+' NORMALIZE INPUT
+'------------------------------------------------------------------------------
+    'Defensively clamp negative elapsed values
+        If Sec < 0# Then Sec = 0#
 
 '------------------------------------------------------------------------------
 ' SPLIT WHOLE / FRACTIONAL SECONDS
@@ -857,7 +883,7 @@ Public Property Get ElapsedTime( _
 '------------------------------------------------------------------------------
 ' CONVERT FRACTIONAL SECONDS TO ns/ms/us/nnn
 '------------------------------------------------------------------------------
-    'Convert fractional seconds to integer nanoseconds (floor for determinism)
+    'Convert fractional seconds to integer nanoseconds
         NS_Total = CLng(Frac * 1000000000#)
 
     'Defensive clamp for unexpected negative values
@@ -894,7 +920,8 @@ Public Property Get ElapsedTime( _
                       sMS & " milliseconds - " & _
                       sUS & " microseconds - " & _
                       sNN & " nanoseconds"
-End Property
+
+End Function
 
 '
 '------------------------------------------------------------------------------
@@ -965,11 +992,12 @@ Public Property Get T2() As Double
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns the last captured raw end timestamp for the most recent timing
-'   session as evaluated by ElapsedSeconds() / ElapsedTime().
+'   session as evaluated by ElapsedSeconds() or by ElapsedTime() when that
+'   function internally performs a timing read
 '
 ' WHY THIS EXISTS
 '   Useful for diagnostics, verification, and unit tests when the caller wants
-'   to inspect the internal raw end capture directly.
+'   to inspect the internal raw end capture directly
 '
 ' INPUTS
 '   None.
@@ -980,8 +1008,11 @@ Public Property Get T2() As Double
 '
 ' BEHAVIOR
 '   - Returns the raw end timestamp without modification.
-'   - m_T2 is updated when ElapsedSeconds() is evaluated, and therefore also
-'     when ElapsedTime() is evaluated.
+'   - m_T2 is updated when ElapsedSeconds() is evaluated.
+'   - m_T2 is also updated when ElapsedTime() is called without
+'     ElapsedSecondsIn, because that path internally measures elapsed time.
+'   - When ElapsedTime() is called with ElapsedSecondsIn, no new timing sample
+'     is taken and m_T2 is not updated by that formatting step.
 '   - The meaning of the value depends on the timing backend:
 '       * Methods 1 / 2 / 3 / 4 / 6 : stored in seconds
 '       * Method 5 (QPC)             : stored as CDbl(m_qpcEnd), i.e. raw QPC ticks
@@ -993,14 +1024,13 @@ Public Property Get T2() As Double
 '   - m_T2
 '
 ' NOTES
-'   - If ElapsedSeconds() / ElapsedTime() has not yet been called after
-'     StartTimer(), T2 may still reflect a prior session or its reset value.
+'   - If ElapsedSeconds() has not yet been called after StartTimer(), T2 may
+'     still reflect a prior session or its reset value.
 '   - T2 is an inspection/debugging surface, not the primary timing API.
 '
 ' UPDATED
-'   2026-03-28
+'   2026-04-15
 '==============================================================================
-
 '------------------------------------------------------------------------------
 ' ASSIGN RESULT
 '------------------------------------------------------------------------------
@@ -1015,11 +1045,11 @@ Public Property Get ET() As Double
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns the last computed elapsed time in seconds for the most recent
-'   timing session.
+'   timing session
 '
 ' WHY THIS EXISTS
 '   Allows callers, diagnostics, and tests to inspect the cached elapsed value
-'   without re-running timing logic or invoking formatting code.
+'   without re-running timing logic or invoking formatting code
 '
 ' INPUTS
 '   None.
@@ -1030,7 +1060,11 @@ Public Property Get ET() As Double
 '
 ' BEHAVIOR
 '   - Returns the cached elapsed-seconds value without modification.
-'   - m_ET is set by ElapsedSeconds() and reused by ElapsedTime().
+'   - m_ET is set by ElapsedSeconds().
+'   - m_ET is also updated when ElapsedTime() is called without
+'     ElapsedSecondsIn, because that path internally measures elapsed time.
+'   - When ElapsedTime() is called with ElapsedSecondsIn, the supplied value is
+'     formatted directly and m_ET is not updated by that formatting step.
 '
 ' ERROR POLICY
 '   Does not raise errors.
@@ -1045,7 +1079,7 @@ Public Property Get ET() As Double
 '     primary timing API.
 '
 ' UPDATED
-'   2026-03-28
+'   2026-04-15
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1113,11 +1147,10 @@ Public Property Get MethodName( _
 '   StartTimer() / ElapsedSeconds() to a readable backend label for diagnostics,
 '   reporting, and UI/debug output.
 '
-' INPUTS
-'   Idx
-'     Timing method index:
+' Idx
+'   Timing method index:
 '       1 = "Timer"
-'       2 = "GetTickCount"
+'       2 = "GetTickCount / GetTickCount64"
 '       3 = "timeGetTime"
 '       4 = "timeGetSystemTime"
 '       5 = "QPC"
@@ -1269,7 +1302,8 @@ Public Function OverheadMeasurement_Seconds( _
         OverheadMeasurement_Seconds = TotalS / CDbl(Iterations)
 End Function
 Public Property Get OverheadMeasurement_Text( _
-    Optional ByVal iMethod As Integer = 5) _
+    Optional ByVal iMethod As Integer = 5, _
+    Optional ByVal Iterations As Long = 1000) _
     As String
 '
 '==============================================================================
@@ -1277,31 +1311,36 @@ Public Property Get OverheadMeasurement_Text( _
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns a human-readable report of the average near-empty measurement
-'   overhead for the selected timer backend.
+'   overhead for the selected timer backend
 '
 ' WHY THIS EXISTS
-'   OverheadMeasurement_Seconds() provides the numeric benchmark primitive.
+'   OverheadMeasurement_Seconds() provides the numeric benchmark primitive
 '
 '   This property exists as the presentation-oriented companion for diagnostics,
-'   logs, and quick inspection.
+'   logs, and quick inspection
 '
 ' INPUTS
 '   iMethod (optional)
 '     Timing backend whose near-empty average measurement overhead should be
-'     reported.
+'     reported
+'
+'   Iterations (optional)
+'     Number of near-empty timing cycles to average
+'     Values less than 1 are coerced to 1 by OverheadMeasurement_Seconds()
 '
 ' RETURNS
 '   String
-'     A human-readable measurement-overhead report.
+'     A human-readable measurement-overhead report
 '
 ' BEHAVIOR
-'   - Normalizes and validates the requested timer method.
-'   - Calls OverheadMeasurement_Seconds() using that backend.
+'   - Normalizes and validates the requested timer method
+'   - Calls OverheadMeasurement_Seconds() using the requested backend and
+'     iteration count
 '   - Returns a readable string containing the backend name and average
-'     measurement overhead in seconds.
+'     measurement overhead in seconds
 '
 ' ERROR POLICY
-'   Validation behavior is delegated to Method_NormalizeStart().
+'   Validation behavior is delegated to Method_NormalizeStart()
 '
 ' DEPENDENCIES
 '   - Method_NormalizeStart
@@ -1309,14 +1348,14 @@ Public Property Get OverheadMeasurement_Text( _
 '   - MethodName
 '
 ' NOTES
-'   - This property is diagnostic/reporting-oriented.
+'   - This property is diagnostic/reporting-oriented
 '   - It is intentionally separate from OverheadMeasurement_Seconds(), which
-'     should remain the machine-readable API for programmatic use.
+'     should remain the machine-readable API for programmatic use
 '   - Defaulting to method 5 (QPC) is appropriate here because this routine is
-'     backend-diagnostic rather than session-bound.
+'     backend-diagnostic rather than session-bound
 '
 ' UPDATED
-'   2026-03-28
+'   2026-04-15
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1328,16 +1367,16 @@ Public Property Get OverheadMeasurement_Text( _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Normalize and validate the timer method.
+    'Normalize and validate the timer method
         ResolvedMethod = Method_NormalizeStart(iMethod)
 
-    'Measure average near-empty overhead.
-        AvgS = OverheadMeasurement_Seconds(ResolvedMethod, 1000)
+    'Measure average near-empty overhead
+        AvgS = OverheadMeasurement_Seconds(ResolvedMethod, Iterations)
 
 '------------------------------------------------------------------------------
 ' ASSIGN RESULT
 '------------------------------------------------------------------------------
-    'Return a readable diagnostic string.
+    'Return a readable diagnostic string
         OverheadMeasurement_Text = "Average measurement overhead - " & _
                                    MethodName(ResolvedMethod) & " - " & _
                                    Format$(AvgS, "0.000000000") & " seconds"
@@ -1622,7 +1661,8 @@ Public Sub Pause( _
 '       1 => Sleep API (kernel32) (millisecond granularity; no DoEvents)
 '       2 => Timer + DoEvents loop (coarser; yields to Excel/UI)
 '       3 => Application.Wait for coarse waiting + Timer guard
-'       Else => Now + DoEvents loop + Timer guard
+'       4 => Now + DoEvents loop + Timer guard
+'       Else => treated like method 4
 '
 ' RETURNS
 '   None.
@@ -1633,8 +1673,8 @@ Public Sub Pause( _
 '   - Method 2 uses Timer() delta logic and yields via DoEvents.
 '   - Method 3 uses Application.Wait as the coarse wait engine, then applies a
 '     Timer()-based guard loop so the total pause cannot undershoot.
-'   - Method 4 (Else) preserves a Date/Now-flavored yielding loop, but also
-'     applies a Timer()-based guard loop so the total pause cannot undershoot.
+'   - Method 4 uses a Date/Now-flavored yielding loop and also applies a
+'     Timer()-based guard loop so the total pause cannot undershoot.
 '
 ' ERROR POLICY
 '   Invalid, non-positive, or excessively large pause durations are treated as
@@ -2848,17 +2888,17 @@ Private Function Get_NextTimestampSeconds( _
         End Select
 End Function
 
-Private Function QPC_Get_NextTimestampSeconds() As Currency
+Private Function QPC_Get_NextTimestampTick() As Currency
 '
 '==============================================================================
 '                                 NEXT TICK QPC
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Aligns to the next QueryPerformanceCounter tick.
+'   Aligns to the next QueryPerformanceCounter tick
 '
 ' WHY THIS EXISTS
 '   In some micro-benchmark scenarios, aligning the QPC start capture to the
-'   next observed counter increment can reduce start-time quantization jitter.
+'   next observed counter increment can reduce start-time quantization jitter
 '
 ' INPUTS
 '   None.
@@ -2866,33 +2906,33 @@ Private Function QPC_Get_NextTimestampSeconds() As Currency
 ' RETURNS
 '   Currency
 '     The first observed QPC counter value strictly greater than the initial
-'     read.
+'     read
 '
 ' BEHAVIOR
-'   - Captures an initial QPC value.
-'   - Spins in a tight loop until a strictly greater QPC value is observed.
-'   - Returns that aligned tick.
+'   - Captures an initial QPC value
+'   - Spins in a tight loop until a strictly greater QPC value is observed
+'   - Returns that aligned raw QPC tick
 '
 ' ERROR POLICY
-'   Does not raise errors directly.
+'   Does not raise errors directly
 '
 ' DEPENDENCIES
 '   - QueryPerformanceCounter
 '
 ' NOTES
-'   - Tight polling loop by design; do not use in ordinary production paths.
+'   - Tight polling loop by design; do not use in ordinary production paths
 '   - QPC is high resolution, so this loop typically exits quickly, but it still
-'     adds overhead and should only be used when explicitly requested.
+'     adds overhead and should only be used when explicitly requested
 '
 ' UPDATED
-'   2026-03-28
+'   2026-04-15
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim T1 As Currency   'Initial counter tick
-    Dim T2 As Currency   'Next counter tick; loop exits when T2 > T1
+    Dim T1  As Currency     'Initial counter tick
+    Dim T2  As Currency     'Next counter tick; loop exits when T2 > T1
 
 '------------------------------------------------------------------------------
 ' ROUTINE
@@ -2906,6 +2946,7 @@ Private Function QPC_Get_NextTimestampSeconds() As Currency
         Loop Until T2 > T1
 
     'Return the aligned tick
-        QPC_Get_NextTimestampSeconds = T2
+        QPC_Get_NextTimestampTick = T2
+        
 End Function
 
