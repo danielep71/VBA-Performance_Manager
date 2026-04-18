@@ -53,10 +53,10 @@ Option Explicit     'Force explicit declaration of all variables
 '       * OverheadMeasurement_Text supports an optional Iterations argument
 '
 ' VERSION
-'   1.0.0
+'   1.1.0
 '
 ' UPDATED
-'   2026-04-15
+'   2026-04-18
 '
 ' AUTHOR
 '   Daniele Penza
@@ -94,13 +94,6 @@ Option Explicit     'Force explicit declaration of all variables
     Private m_SummaryNextRow        As Long      'Next writable row in the case-summary section
     Private m_DetailNextRow         As Long      'Next writable row in the failure-detail section
 
-'
-'==============================================================================
-'
-'                               SUITE RUNNER
-'
-'==============================================================================
-
 Public Sub Run_cPerformanceManager_RegressionSuite()
 '
 '==============================================================================
@@ -110,8 +103,8 @@ Public Sub Run_cPerformanceManager_RegressionSuite()
 '   Executes the full regression suite for cPerformanceManager
 '
 ' WHY THIS EXISTS
-'   This is the single public entry point for the regression module. It prepares
-'   the dedicated regression worksheet, resets suite counters, runs every test
+'   This is the single public entry point for the regression module. It resets
+'   suite state, prepares the dedicated regression worksheet, runs every test
 '   case in a deterministic order, and then prints / writes the final summary
 '
 ' INPUTS
@@ -127,13 +120,14 @@ Public Sub Run_cPerformanceManager_RegressionSuite()
 '   - Initializes the worksheet log and suite header
 '   - Executes all regression cases in deterministic order
 '   - Forces a clean TW baseline again at the end of the suite
-'   - Prints the suite footer even when the runner fails after initialization
+'   - Prints the suite footer when the logging infrastructure is ready
 '   - Restores Application state before re-raising any unexpected runner error
 '
 ' ERROR POLICY
 '   Individual cases handle their own unexpected errors and record failures
-'   This runner restores Application state and then re-raises unexpected
-'   runner-level errors normally
+'
+'   This runner captures any unexpected runner-level error, performs centralized
+'   cleanup, and then re-raises the original runner-level error
 '
 ' DEPENDENCIES
 '   - PM_TW_EndAllSessions
@@ -151,28 +145,29 @@ Public Sub Run_cPerformanceManager_RegressionSuite()
 '   shared-state and cleanup behaviors
 '
 ' UPDATED
-'   2026-04-15
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WB                  As Workbook             'Target workbook
-    Dim WS_Test             As Worksheet            'Dedicated regression worksheet
-    
-    Dim FastModeState       As tDemoFastModeState   'Saved Application-state snapshot
-    Dim FastModeOn          As Boolean              'TRUE when fast mode was entered
-    Dim FooterCanPrint      As Boolean              'TRUE when footer/log infrastructure is ready
-    
-    Dim SavedErrNum         As Long                 'Captured error number
-    Dim SavedErrSrc         As String               'Captured error source
-    Dim SavedErrDesc        As String               'Captured error description
+    Dim WB                      As Workbook             'Target workbook
+    Dim WS_Test                 As Worksheet            'Dedicated regression worksheet
+
+    Dim FastModeState           As tDemoFastModeState   'Saved Application-state snapshot
+    Dim FastModeOn              As Boolean              'TRUE when fast mode was entered
+    Dim FooterCanPrint          As Boolean              'TRUE when footer/log infrastructure is ready
+    Dim SuppressCleanupErrors   As Boolean              'TRUE when cleanup must not mask an earlier error
+
+    Dim SavedErrNum             As Long                 'Captured error number
+    Dim SavedErrSrc             As String               'Captured error source
+    Dim SavedErrDesc            As String               'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Enable structured cleanup on failure
-        On Error GoTo CleanFail
+        On Error GoTo Clean_Fail
     'Simulate a pressed button when the routine was launched by a shape
         Btn_Click
     'Force the shared TW manager to a clean baseline before the suite begins
@@ -194,7 +189,7 @@ Public Sub Run_cPerformanceManager_RegressionSuite()
         DEMO_Build_DemoTemplate _
             cPM_SHEET_LOG, _
             "CLASS PERFORMANCE MANAGER", _
-            "REGRESSION TESTS", , , , , , , , , , , , , , , "Q", 33
+            "REGRESSION TESTS", , , , , , , , , , , , , , , "Q", 41
     'Resolve the prepared regression worksheet
         Set WS_Test = WB.Worksheets(cPM_SHEET_LOG)
     'Initialize the dedicated worksheet log
@@ -205,7 +200,7 @@ Public Sub Run_cPerformanceManager_RegressionSuite()
         FooterCanPrint = True
 
 '------------------------------------------------------------------------------
-' RUN REGRESSION CASES
+' RUN CORE / TIMING REGRESSION CASES
 '------------------------------------------------------------------------------
     'Validate constructor/default state
         Test_DefaultState
@@ -225,6 +220,10 @@ Public Sub Run_cPerformanceManager_RegressionSuite()
         Test_AlignedStart_AllMethods
     'Validate raw accessor behavior after a QPC measurement
         Test_Accessors_QPC
+
+'------------------------------------------------------------------------------
+' RUN VALIDATION / FALLBACK REGRESSION CASES
+'------------------------------------------------------------------------------
     'Validate strict-mode behavior when elapsed time is requested before StartTimer
         Test_StrictMode_ElapsedBeforeStart
     'Validate strict-mode behavior for explicit method mismatch
@@ -235,12 +234,20 @@ Public Sub Run_cPerformanceManager_RegressionSuite()
         Test_NonStrictMode_InvalidStartFallback
     'Validate non-strict fallback for explicit elapsed-method mismatch
         Test_NonStrictMode_MethodMismatchFallback
+
+'------------------------------------------------------------------------------
+' RUN DIAGNOSTIC / OVERHEAD REGRESSION CASES
+'------------------------------------------------------------------------------
     'Validate numeric overhead measurement helpers
         Test_OverheadMeasurement_Seconds
     'Validate formatted overhead measurement helpers
         Test_OverheadMeasurement_Text
     'Validate diagnostic / informational properties
         Test_Diagnostics_Properties
+
+'------------------------------------------------------------------------------
+' RUN PAUSE REGRESSION CASES
+'------------------------------------------------------------------------------
     'Validate Pause method 1
         Test_Pause_Method1
     'Validate Pause method 2
@@ -249,6 +256,10 @@ Public Sub Run_cPerformanceManager_RegressionSuite()
         Test_Pause_Method3
     'Validate Pause method 4
         Test_Pause_Method4
+
+'------------------------------------------------------------------------------
+' RUN TW / CLEANUP REGRESSION CASES
+'------------------------------------------------------------------------------
     'Validate blank-key behavior in the shared TW manager
         Test_TW_BlankKeyValidation
     'Validate single-instance TW lifecycle
@@ -258,29 +269,86 @@ Public Sub Run_cPerformanceManager_RegressionSuite()
     'Validate ResetEnvironment idempotence and cleanup behavior
         Test_ResetEnvironment_Idempotent
 
-CleanExit:
+'------------------------------------------------------------------------------
+' RUN CHECKPOINT / REPORTING REGRESSION CASES
+'------------------------------------------------------------------------------
+    'Validate that Checkpoint raises before StartTimer
+        Test_Checkpoint_BeforeStart
+    'Validate SetRunLabel before first checkpoint
+        Test_SetRunLabel_BeforeFirstCheckpoint
+    'Validate SetRunLabel rejection after first checkpoint
+        Test_SetRunLabel_AfterFirstCheckpoint
+    'Validate default checkpoint naming when the supplied name is blank
+        Test_Checkpoint_DefaultName_WhenBlank
+    'Validate checkpoint count and ReportAsArray structure/content
+        Test_CheckpointCount_And_ReportArray
+    'Validate ReportAsText behavior when no checkpoints exist
+        Test_ReportAsText_Empty
+    'Validate ReportAsText behavior after checkpoint capture
+        Test_ReportAsText_WithCheckpoints
+    'Validate ClearCheckpoints behavior
+        Test_ClearCheckpoints
+    'Validate that StartTimer resets checkpoint/report state
+        Test_StartTimer_ClearsCheckpointState
+
+Clean_Exit:
 '------------------------------------------------------------------------------
 ' FINALIZE
+'------------------------------------------------------------------------------
+    'Determine whether cleanup must be best-effort to preserve an earlier error
+        SuppressCleanupErrors = (SavedErrNum <> 0)
+    'Do not let cleanup failures mask the original runner-level error
+        If SuppressCleanupErrors Then
+            On Error Resume Next
+        End If
+
+'------------------------------------------------------------------------------
+' RESTORE SHARED / APPLICATION STATE
 '------------------------------------------------------------------------------
     'Force the shared TW manager to a clean baseline after the suite ends
         PM_TW_EndAllSessions
     'Print the final suite summary when the logging infrastructure is available
-        If FooterCanPrint Then Suite_PrintFooter
-    'Bring the regression worksheet to the foreground for the user
-        If Not WS_Test Is Nothing Then
-            WS_Test.Activate
-            WS_Test.Range("A1").Select
+        If FooterCanPrint Then
+            Suite_PrintFooter
         End If
     'Restore the normal cursor
         Application.Cursor = xlDefault
     'Restore the original Excel Application state only when fast mode was entered
-        If FastModeOn Then DEMO_End_FastMode FastModeState
+        If FastModeOn Then
+            DEMO_End_FastMode FastModeState
+        End If
+
+'------------------------------------------------------------------------------
+' APPLY FINAL PRESENTATION STEP
+'------------------------------------------------------------------------------
+    'Bring the regression worksheet to the foreground on a best-effort basis
+        On Error Resume Next
+        If Not WS_Test Is Nothing Then
+            WS_Test.Activate
+            WS_Test.Range("A1").Select
+        End If
+
+'------------------------------------------------------------------------------
+' RESTORE ERROR MODE
+'------------------------------------------------------------------------------
+    'Restore the appropriate error mode after cleanup / presentation work
+        If SuppressCleanupErrors Then
+            On Error GoTo 0
+        Else
+            On Error GoTo Clean_Fail
+        End If
+
+'------------------------------------------------------------------------------
+' RE-RAISE ORIGINAL ERROR
+'------------------------------------------------------------------------------
     'Re-raise the original runner-level error after cleanup when needed
-        If SavedErrNum <> 0 Then Err.Raise SavedErrNum, SavedErrSrc, SavedErrDesc
-    
+        If SavedErrNum <> 0 Then
+            Err.Raise SavedErrNum, SavedErrSrc, SavedErrDesc
+        End If
+
     Exit Sub
 
-CleanFail:
+Clean_Fail:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
@@ -289,11 +357,9 @@ CleanFail:
         SavedErrSrc = Err.Source
         SavedErrDesc = Err.Description
     'Continue through the centralized cleanup path
-        Resume CleanExit
+        Resume Clean_Exit
 
 End Sub
-
-
 '
 '==============================================================================
 '
@@ -307,11 +373,12 @@ Private Sub Suite_ResetCounters()
 '                           SUITE RESET COUNTERS
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Resets all suite-level counters and current-case tracking
+'   Resets suite-level counters and run-level tracking state
 '
 ' WHY THIS EXISTS
-'   The regression runner needs deterministic counters for every run so that the
-'   final summary is meaningful and unaffected by any previous execution
+'   Each regression run should start from a deterministic baseline so that case
+'   counts, assertion counts, failure counts, and worksheet-log pointers are
+'   not contaminated by prior runs
 '
 ' INPUTS
 '   None
@@ -319,42 +386,42 @@ Private Sub Suite_ResetCounters()
 ' RETURNS
 '   None
 '
-' BEHAVIOR
-'   Clears:
-'     - total case count
-'     - total assertion count
-'     - total failure count
-'     - current-case name
-'     - per-case start markers
-'
 ' UPDATED
-'   2026-04-15
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
-' RESET STATE
+' RESET SUITE COUNTERS
 '------------------------------------------------------------------------------
     'Reset the executed-case counter
         m_TotalCases = 0
-
     'Reset the assertion counter
         m_TotalAssertions = 0
-
     'Reset the failure counter
         m_TotalFailures = 0
 
+'------------------------------------------------------------------------------
+' RESET CURRENT-CASE TRACKING
+'------------------------------------------------------------------------------
     'Clear the current-case name
         m_CurrentCaseName = vbNullString
-
-    'Reset per-case start markers
+    'Reset the per-case assertion baseline
         m_CaseAssertions_Begin = 0
+    'Reset the per-case failure baseline
         m_CaseFailures_Begin = 0
 
-    'Clear run-level worksheet-log state
+'------------------------------------------------------------------------------
+' RESET RUN-LEVEL LOG STATE
+'------------------------------------------------------------------------------
+    'Clear the shared run timestamp
         m_RunTimestamp = vbNullString
+    'Reset the next writable row in the case-summary section
         m_SummaryNextRow = 0
+    'Reset the next writable row in the failure-detail section
         m_DetailNextRow = 0
+
 End Sub
+
 
 Private Sub Suite_InitLogSheet()
 '
@@ -362,12 +429,12 @@ Private Sub Suite_InitLogSheet()
 '                           SUITE INIT LOG SHEET
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Creates or resets the dedicated worksheet log used by the regression suite
+'   Initializes the dedicated worksheet log used by the regression suite
 '
 ' WHY THIS EXISTS
 '   Debug.Print alone is not a reliable medium for a large suite because older
-'   lines become difficult to inspect. A dedicated worksheet preserves the full
-'   run output in a structured, reviewable format
+'   lines become difficult to inspect. A dedicated worksheet preserves the run
+'   output in a structured, reviewable format
 '
 ' INPUTS
 '   None
@@ -376,11 +443,11 @@ Private Sub Suite_InitLogSheet()
 '   None
 '
 ' BEHAVIOR
-'   - Gets or creates the regression-log worksheet
+'   - Resolves the dedicated regression-log worksheet
 '   - Stamps one run timestamp for the whole suite
-'   - Clears the target log layout area
+'   - Adjusts the visible worksheet layout required by the regression log
 '   - Rebuilds the case-summary section
-'   - Rebuilds the failure-details section
+'   - Rebuilds the failure-detail section
 '   - Applies deterministic widths, alignments, headers, and borders
 '   - Initializes row pointers for case summaries and failure details
 '
@@ -393,12 +460,11 @@ Private Sub Suite_InitLogSheet()
 '   - DEMO_Set_RangeBorder
 '
 ' NOTES
-'   This routine is intentionally idempotent:
-'     - it does not insert rows or columns
-'     - it rebuilds the same fixed layout every time
+'   This routine assumes the regression sheet has just been rebuilt by the
+'   suite runner before initialization begins
 '
 ' UPDATED
-'   2026-04-17
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -416,7 +482,11 @@ Private Sub Suite_InitLogSheet()
         m_RunTimestamp = Format$(Now, "yyyy-mm-dd hh:nn:ss")
     'Resolve the regression-log worksheet
         Set WS = Suite_GetOrCreateLogSheet()
-    'Insert two columns
+
+'------------------------------------------------------------------------------
+' ADJUST WORKSHEET LAYOUT
+'------------------------------------------------------------------------------
+    'Insert the extra columns required by the failure-detail section layout
         WS.Columns("L:M").Insert _
             Shift:=xlToRight, _
             CopyOrigin:=xlFormatFromLeftOrAbove
@@ -457,13 +527,13 @@ Private Sub Suite_InitLogSheet()
         WS.Columns("L").ColumnWidth = 10
         WS.Columns("M").ColumnWidth = 40
         WS.Columns("N").ColumnWidth = 10
-        WS.Columns("O").ColumnWidth = 40
+        WS.Columns("O").ColumnWidth = 30
 
 '------------------------------------------------------------------------------
 ' APPLY BASE ALIGNMENT
 '------------------------------------------------------------------------------
     'Apply center alignment to the structured log block by default
-        With WS.Range("C6:O30")
+        With WS.Range("C6:O50")
             .HorizontalAlignment = xlCenter
             .VerticalAlignment = xlCenter
             .Font.Size = 9
@@ -507,7 +577,7 @@ Private Sub Suite_InitLogSheet()
     ' APPLY VISUAL FRAME
     '--------------------------------------------------------------------------
         'Apply a border around the visible case-summary block
-            DEMO_Set_RangeBorder WS.Range("C4:H30")
+            DEMO_Set_RangeBorder WS.Range("C4:H39")
 
 '------------------------------------------------------------------------------
 ' BUILD FAILURE DETAILS AREA
@@ -542,7 +612,7 @@ Private Sub Suite_InitLogSheet()
     ' APPLY VISUAL FRAME
     '--------------------------------------------------------------------------
         'Apply a border around the visible failure-detail block
-            DEMO_Set_RangeBorder WS.Range("I4:O30")
+            DEMO_Set_RangeBorder WS.Range("I4:O39")
 
 '------------------------------------------------------------------------------
 ' INITIALIZE ROW POINTERS
@@ -552,12 +622,6 @@ Private Sub Suite_InitLogSheet()
     'Initialize the first writable detail row
         m_DetailNextRow = 6
 
-'------------------------------------------------------------------------------
-' POSITION CURSOR
-'------------------------------------------------------------------------------
-    'Park the cursor near the top-left of the visible log layout
-        WS.Range("C4").Select
-
 End Sub
 Private Function Suite_GetOrCreateLogSheet() As Worksheet
 '
@@ -565,24 +629,18 @@ Private Function Suite_GetOrCreateLogSheet() As Worksheet
 '                        SUITE GET OR CREATE LOG SHEET
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Returns the dedicated regression worksheet, creating it if missing
+'   Returns the dedicated regression-log worksheet, creating it if missing
 '
 ' WHY THIS EXISTS
-'   The regression module should remain self-contained and should not depend on
-'   external builder modules merely to create or resolve its output worksheet
+'   The regression module should remain self-contained and able to resolve its
+'   own output worksheet without depending on external sheet-builder logic
 '
 ' INPUTS
 '   None
 '
 ' RETURNS
 '   Worksheet
-'     Existing or newly created regression worksheet
-'
-' BEHAVIOR
-'   - Searches ThisWorkbook for the dedicated regression sheet name
-'   - Returns the existing worksheet when found
-'   - Creates the worksheet at the end of the workbook when missing
-'   - Assigns the standard regression sheet name to the new worksheet
+'     Existing or newly created regression-log worksheet
 '
 ' ERROR POLICY
 '   Raises errors normally
@@ -591,12 +649,8 @@ Private Function Suite_GetOrCreateLogSheet() As Worksheet
 '   - ThisWorkbook
 '   - cPM_SHEET_LOG
 '
-' NOTES
-'   This helper intentionally uses the regression module's own worksheet-name
-'   constant so the suite remains self-contained
-'
 ' UPDATED
-'   2026-04-17
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -604,29 +658,50 @@ Private Function Suite_GetOrCreateLogSheet() As Worksheet
 '------------------------------------------------------------------------------
     Dim WB                  As Workbook     'Target workbook
     Dim WS                  As Worksheet    'Worksheet iterator / result
-
-'------------------------------------------------------------------------------
-' VALIDATE
-'------------------------------------------------------------------------------
-    'Reject a blank regression-sheet name constant
-        If Len(Trim$(cPM_SHEET_LOG)) = 0 Then
-            Err.Raise vbObjectError + 2400, _
-                      "M_cPM_RegressionTests.Suite_GetOrCreateLogSheet", _
-                      "Regression sheet name cannot be blank."
-        End If
+    Dim SheetNameText       As String       'Requested regression sheet name
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Resolve the workbook that contains the regression module
         Set WB = ThisWorkbook
+    'Resolve the requested regression sheet name
+        SheetNameText = Trim$(cPM_SHEET_LOG)
+
+'------------------------------------------------------------------------------
+' VALIDATE SHEET NAME
+'------------------------------------------------------------------------------
+    'Reject a blank regression-sheet name
+        If Len(SheetNameText) = 0 Then
+            Err.Raise vbObjectError + 2400, _
+                      "M_cPM_RegressionTests.Suite_GetOrCreateLogSheet", _
+                      "Regression sheet name cannot be blank."
+        End If
+    'Reject names longer than Excel's worksheet-name limit
+        If Len(SheetNameText) > 31 Then
+            Err.Raise vbObjectError + 2401, _
+                      "M_cPM_RegressionTests.Suite_GetOrCreateLogSheet", _
+                      "Regression sheet name cannot exceed 31 characters."
+        End If
+    'Reject worksheet names containing invalid Excel characters
+        If InStr(1, SheetNameText, ":", vbBinaryCompare) > 0 _
+        Or InStr(1, SheetNameText, "\", vbBinaryCompare) > 0 _
+        Or InStr(1, SheetNameText, "/", vbBinaryCompare) > 0 _
+        Or InStr(1, SheetNameText, "?", vbBinaryCompare) > 0 _
+        Or InStr(1, SheetNameText, "*", vbBinaryCompare) > 0 _
+        Or InStr(1, SheetNameText, "[", vbBinaryCompare) > 0 _
+        Or InStr(1, SheetNameText, "]", vbBinaryCompare) > 0 Then
+            Err.Raise vbObjectError + 2402, _
+                      "M_cPM_RegressionTests.Suite_GetOrCreateLogSheet", _
+                      "Regression sheet name contains one or more invalid Excel worksheet-name characters."
+        End If
 
 '------------------------------------------------------------------------------
 ' SEARCH EXISTING SHEETS
 '------------------------------------------------------------------------------
     'Search for an existing worksheet with the requested regression-sheet name
         For Each WS In WB.Worksheets
-            If StrComp(WS.Name, cPM_SHEET_LOG, vbTextCompare) = 0 Then
+            If StrComp(WS.Name, SheetNameText, vbTextCompare) = 0 Then
                 Set Suite_GetOrCreateLogSheet = WS
                 Exit Function
             End If
@@ -638,7 +713,7 @@ Private Function Suite_GetOrCreateLogSheet() As Worksheet
     'Create a new worksheet because the requested one does not yet exist
         Set WS = WB.Worksheets.Add(After:=WB.Worksheets(WB.Worksheets.Count))
     'Assign the requested regression-sheet name to the new worksheet
-        WS.Name = cPM_SHEET_LOG
+        WS.Name = SheetNameText
 
 '------------------------------------------------------------------------------
 ' ASSIGN RESULT
@@ -647,6 +722,7 @@ Private Function Suite_GetOrCreateLogSheet() As Worksheet
         Set Suite_GetOrCreateLogSheet = WS
 
 End Function
+
 Private Sub Suite_PrintHeader()
 '
 '==============================================================================
@@ -656,8 +732,8 @@ Private Sub Suite_PrintHeader()
 '   Prints the suite-level header to the Immediate Window
 '
 ' WHY THIS EXISTS
-'   The header makes a regression run easy to identify and separates one run
-'   from prior Immediate Window output
+'   Makes a regression run easy to identify and separates it from prior
+'   Immediate Window output
 '
 ' INPUTS
 '   None
@@ -665,32 +741,28 @@ Private Sub Suite_PrintHeader()
 ' RETURNS
 '   None
 '
-' BEHAVIOR
-'   Prints:
-'     - a delimiter line
-'     - suite title
-'     - timestamp
-'     - worksheet-log target
-'     - a second delimiter line
-'
 ' UPDATED
-'   2026-04-15
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' PRINT HEADER
 '------------------------------------------------------------------------------
+    'Print a blank line before the suite header block
+        Debug.Print vbNullString
     'Print the opening delimiter
         Debug.Print String$(100, "=")
     'Print the suite title
-        Debug.Print "REGRESSION SUITE START: cPerformanceManager"
+        Debug.Print "REGRESSION SUITE START : cPerformanceManager"
     'Print the suite timestamp
-        Debug.Print "Timestamp: " & m_RunTimestamp
+        Debug.Print "Timestamp              : " & m_RunTimestamp
     'Print the worksheet-log target
-        Debug.Print "Worksheet log: " & cPM_SHEET_LOG
-    'Print the closing delimiter for the header block
+        Debug.Print "Worksheet log          : " & cPM_SHEET_LOG
+    'Print the closing delimiter
         Debug.Print String$(100, "=")
+
 End Sub
+
 
 Private Sub Suite_PrintFooter()
 '
@@ -701,8 +773,8 @@ Private Sub Suite_PrintFooter()
 '   Prints the suite-level summary to the Immediate Window
 '
 ' WHY THIS EXISTS
-'   A regression run should end with a concise summary that reports how many
-'   cases and assertions ran and whether any failures were recorded
+'   A regression run should end with a concise summary of execution volume and
+'   overall pass / fail status
 '
 ' INPUTS
 '   None
@@ -710,16 +782,8 @@ Private Sub Suite_PrintFooter()
 ' RETURNS
 '   None
 '
-' BEHAVIOR
-'   Prints:
-'     - total cases
-'     - total assertions
-'     - total failures
-'     - overall pass / fail status
-'     - the worksheet-log sheet name
-'
 ' UPDATED
-'   2026-04-15
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -728,21 +792,360 @@ Private Sub Suite_PrintFooter()
     'Print a delimiter line before the summary block
         Debug.Print String$(100, "-")
     'Print the total number of executed cases
-        Debug.Print "Total cases      : " & m_TotalCases
+        Debug.Print "Total cases           : " & m_TotalCases
     'Print the total number of executed assertions
-        Debug.Print "Total assertions : " & m_TotalAssertions
+        Debug.Print "Total assertions      : " & m_TotalAssertions
     'Print the total number of recorded failures
-        Debug.Print "Total failures   : " & m_TotalFailures
+        Debug.Print "Total failures        : " & m_TotalFailures
     'Print the overall suite status
         If m_TotalFailures = 0 Then
-            Debug.Print "OVERALL RESULT   : PASS"
+            Debug.Print "OVERALL RESULT        : PASS"
         Else
-            Debug.Print "OVERALL RESULT   : FAIL"
+            Debug.Print "OVERALL RESULT        : FAIL"
         End If
     'Print the worksheet-log target
-        Debug.Print "Worksheet log    : " & cPM_SHEET_LOG
-    'Print a final delimiter line
+        Debug.Print "Worksheet log         : " & cPM_SHEET_LOG
+    'Print the closing delimiter
         Debug.Print String$(100, "=")
+
+End Sub
+
+Private Sub Test_Assert_ApproxDouble( _
+    ByVal Expected As Double, _
+    ByVal Actual As Double, _
+    ByVal Tolerance As Double, _
+    ByVal MessageText As String)
+'
+'==============================================================================
+'                        TEST ASSERT APPROX DOUBLE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Records a pass/fail assertion for approximate Double equality
+'
+' WHY THIS EXISTS
+'   Floating-point values are often better compared within a tolerance than by
+'   exact equality
+'
+' INPUTS
+'   Expected
+'     Expected Double value
+'
+'   Actual
+'     Actual Double value
+'
+'   Tolerance
+'     Maximum allowed absolute difference
+'
+'   MessageText
+'     Human-readable assertion label
+'
+' RETURNS
+'   None
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' ASSERT APPROXIMATE EQUALITY
+'------------------------------------------------------------------------------
+    'Assert that the absolute difference is within the requested tolerance
+        Test_Assert_True (Abs(Actual - Expected) <= Tolerance), _
+                          MessageText & " | expected=" & Format$(Expected, "0.000000000") & _
+                          " actual=" & Format$(Actual, "0.000000000") & _
+                          " tol=" & Format$(Tolerance, "0.000000000")
+
+End Sub
+
+
+Private Sub Test_Assert_InRangeDouble( _
+    ByVal LowerBound As Double, _
+    ByVal UpperBound As Double, _
+    ByVal Actual As Double, _
+    ByVal MessageText As String)
+'
+'==============================================================================
+'                       TEST ASSERT INRANGE DOUBLE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Records a pass/fail assertion that a Double lies within a closed interval
+'
+' WHY THIS EXISTS
+'   Pause and elapsed-time checks are often more meaningful as range checks than
+'   as exact-value checks
+'
+' INPUTS
+'   LowerBound
+'     Minimum acceptable value
+'
+'   UpperBound
+'     Maximum acceptable value
+'
+'   Actual
+'     Actual measured value
+'
+'   MessageText
+'     Human-readable assertion label
+'
+' RETURNS
+'   None
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' ASSERT RANGE
+'------------------------------------------------------------------------------
+    'Assert that the actual value lies within the closed interval
+        Test_Assert_True ((Actual >= LowerBound) And (Actual <= UpperBound)), _
+                          MessageText & " | range=[" & Format$(LowerBound, "0.000000000") & _
+                          ", " & Format$(UpperBound, "0.000000000") & _
+                          "] actual=" & Format$(Actual, "0.000000000")
+
+End Sub
+
+Private Sub Test_Assert_NonNegativeDouble( _
+    ByVal Actual As Double, _
+    ByVal MessageText As String)
+'
+'==============================================================================
+'                     TEST ASSERT NONNEGATIVE DOUBLE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Records a pass/fail assertion that a Double is nonnegative
+'
+' WHY THIS EXISTS
+'   Many timing and diagnostic values should never be negative
+'
+' INPUTS
+'   Actual
+'     Actual Double value
+'
+'   MessageText
+'     Human-readable assertion label
+'
+' RETURNS
+'   None
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' ASSERT NONNEGATIVE
+'------------------------------------------------------------------------------
+    'Assert that the actual value is nonnegative
+        Test_Assert_True (Actual >= 0#), _
+                          MessageText & " | actual=" & Format$(Actual, "0.000000000")
+
+End Sub
+
+
+Private Sub Test_Assert_True( _
+    ByVal Condition As Boolean, _
+    ByVal MessageText As String)
+'
+'==============================================================================
+'                             TEST ASSERT TRUE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Records a pass/fail assertion based on a Boolean condition
+'
+' WHY THIS EXISTS
+'   Most regression checks reduce naturally to a Boolean predicate. This helper
+'   centralizes assertion counting and failure logging
+'
+' INPUTS
+'   Condition
+'     Boolean result to evaluate
+'
+'   MessageText
+'     Human-readable assertion label
+'
+' RETURNS
+'   None
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' UPDATE ASSERTION COUNT
+'------------------------------------------------------------------------------
+    'Increment the total assertion count
+        m_TotalAssertions = m_TotalAssertions + 1
+
+'------------------------------------------------------------------------------
+' RECORD FAILURE ONLY
+'------------------------------------------------------------------------------
+    'Exit quietly for passing assertions
+        If Condition Then Exit Sub
+    'Count one failing assertion
+        m_TotalFailures = m_TotalFailures + 1
+    'Write the failure detail to the worksheet log
+        LogFailureDetail "ASSERT", MessageText
+
+End Sub
+
+Private Sub Test_Assert_EqualLong( _
+    ByVal Expected As Long, _
+    ByVal Actual As Long, _
+    ByVal MessageText As String)
+'
+'==============================================================================
+'                          TEST ASSERT EQUAL LONG
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Records a pass/fail assertion for Long equality
+'
+' WHY THIS EXISTS
+'   Many regression checks compare IDs, counters, and other Long-valued states
+'
+' INPUTS
+'   Expected
+'     Expected Long value
+'
+'   Actual
+'     Actual Long value
+'
+'   MessageText
+'     Human-readable assertion label
+'
+' RETURNS
+'   None
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' ASSERT EQUALITY
+'------------------------------------------------------------------------------
+    'Assert that the actual Long equals the expected Long
+        Test_Assert_True (Actual = Expected), _
+                          MessageText & " | expected=" & CStr(Expected) & _
+                          " actual=" & CStr(Actual)
+
+End Sub
+
+Private Sub Test_Assert_EqualBoolean( _
+    ByVal Expected As Boolean, _
+    ByVal Actual As Boolean, _
+    ByVal MessageText As String)
+'
+'==============================================================================
+'                        TEST ASSERT EQUAL BOOLEAN
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Records a pass/fail assertion for Boolean equality
+'
+' WHY THIS EXISTS
+'   Many state and lifecycle checks are Boolean in nature
+'
+' INPUTS
+'   Expected
+'     Expected Boolean value
+'
+'   Actual
+'     Actual Boolean value
+'
+'   MessageText
+'     Human-readable assertion label
+'
+' RETURNS
+'   None
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' ASSERT EQUALITY
+'------------------------------------------------------------------------------
+    'Assert that the actual Boolean equals the expected Boolean
+        Test_Assert_True (Actual = Expected), _
+                          MessageText & " | expected=" & CStr(Expected) & _
+                          " actual=" & CStr(Actual)
+
+End Sub
+
+Private Sub Test_Assert_EqualString( _
+    ByVal Expected As String, _
+    ByVal Actual As String, _
+    ByVal MessageText As String)
+'
+'==============================================================================
+'                         TEST ASSERT EQUAL STRING
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Records a pass/fail assertion for String equality
+'
+' WHY THIS EXISTS
+'   Method labels and text diagnostics often need exact text comparison
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Q                   As String        'Double-quote character
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Prepare a reusable double-quote character
+        Q = Chr$(34)
+
+'------------------------------------------------------------------------------
+' ASSERT EQUALITY
+'------------------------------------------------------------------------------
+    'Assert that the actual String equals the expected String
+        Test_Assert_True (Actual = Expected), _
+                          MessageText & " | expected=" & Q & Expected & Q & _
+                          " actual=" & Q & Actual & Q
+
+End Sub
+
+Private Sub Test_Assert_ContainsString( _
+    ByVal SourceText As String, _
+    ByVal SubText As String, _
+    ByVal MessageText As String)
+'
+'==============================================================================
+'                       TEST ASSERT CONTAINS STRING
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Records a pass/fail assertion that one String contains another
+'
+' WHY THIS EXISTS
+'   Many formatted outputs are better validated by required markers than by
+'   exact whole-string equality
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Q                   As String        'Double-quote character
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Prepare a reusable double-quote character
+        Q = Chr$(34)
+
+'------------------------------------------------------------------------------
+' ASSERT CONTAINS
+'------------------------------------------------------------------------------
+    'Assert that the source text contains the required substring
+        Test_Assert_True (InStr(1, SourceText, SubText, vbTextCompare) > 0), _
+                          MessageText & " | required=" & Q & SubText & Q
+
 End Sub
 
 Private Sub Case_Begin( _
@@ -755,8 +1158,8 @@ Private Sub Case_Begin( _
 '   Marks the start of one regression case
 '
 ' WHY THIS EXISTS
-'   This helper centralizes case counting, current-case naming, and per-case
-'   counter baselining while keeping Immediate Window output compact
+'   Centralizes case counting, current-case naming, and per-case counter
+'   baselining
 '
 ' INPUTS
 '   CaseName
@@ -765,27 +1168,30 @@ Private Sub Case_Begin( _
 ' RETURNS
 '   None
 '
-' BEHAVIOR
-'   - Increments the total case counter
-'   - Stores the active case name
-'   - Captures assertion/failure counters at case start
-'
 ' UPDATED
-'   2026-04-15
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
-' UPDATE STATE
+' UPDATE CASE COUNTER
 '------------------------------------------------------------------------------
     'Increment the total number of executed cases
         m_TotalCases = m_TotalCases + 1
 
-    'Store the current case name
-        m_CurrentCaseName = CaseName
+'------------------------------------------------------------------------------
+' UPDATE CURRENT-CASE STATE
+'------------------------------------------------------------------------------
+    'Store the current case name in trimmed form
+        m_CurrentCaseName = Trim$(CaseName)
 
-    'Capture per-case starting counters
+'------------------------------------------------------------------------------
+' CAPTURE PER-CASE BASELINES
+'------------------------------------------------------------------------------
+    'Capture the assertion counter at case start
         m_CaseAssertions_Begin = m_TotalAssertions
+    'Capture the failure counter at case start
         m_CaseFailures_Begin = m_TotalFailures
+
 End Sub
 
 Private Sub Case_Finalize()
@@ -794,12 +1200,12 @@ Private Sub Case_Finalize()
 '                              CASE FINALIZE
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Finalizes one regression case by writing a compact case summary to the
-'   worksheet log and to the Immediate Window
+'   Finalizes one regression case by writing a compact summary to the worksheet
+'   log and to the Immediate Window
 '
 ' WHY THIS EXISTS
-'   Printing one compact line per case keeps the Immediate Window readable,
-'   while the worksheet preserves the full structured run output
+'   Keeps the Immediate Window readable while preserving structured case output
+'   on the dedicated regression sheet
 '
 ' INPUTS
 '   None
@@ -807,29 +1213,15 @@ Private Sub Case_Finalize()
 ' RETURNS
 '   None
 '
-' BEHAVIOR
-'   - Resolves the dedicated regression-log worksheet
-'   - Computes per-case assertion count
-'   - Computes per-case failure count
-'   - Resolves the per-case PASS / FAIL result
-'   - Writes one compact summary row to the worksheet log
-'   - Prints one compact PASS / FAIL line to the Immediate Window
-'   - Advances the summary-row pointer
-'
-' ERROR POLICY
-'   Raises errors normally
-'
-' DEPENDENCIES
-'   - Suite_GetOrCreateLogSheet
-'
 ' UPDATED
-'   2026-04-17
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
     Dim WS                  As Worksheet    'Regression-log worksheet
+    Dim SummaryRow          As Long         'Current summary-row target
     Dim CaseAssertions      As Long         'Assertions executed in this case
     Dim CaseFailures        As Long         'Failures recorded in this case
     Dim ResultText          As String       'Per-case result text
@@ -839,6 +1231,8 @@ Private Sub Case_Finalize()
 '------------------------------------------------------------------------------
     'Resolve the regression-log worksheet
         Set WS = Suite_GetOrCreateLogSheet()
+    'Resolve the current summary-row target
+        SummaryRow = m_SummaryNextRow
     'Compute assertions executed in this case
         CaseAssertions = m_TotalAssertions - m_CaseAssertions_Begin
     'Compute failures recorded in this case
@@ -853,18 +1247,15 @@ Private Sub Case_Finalize()
 '------------------------------------------------------------------------------
 ' WRITE WORKSHEET SUMMARY ROW
 '------------------------------------------------------------------------------
-    'Write the run timestamp
-        WS.Cells(m_SummaryNextRow, "C").Value = m_RunTimestamp
-    'Write the case number
-        WS.Cells(m_SummaryNextRow, "D").Value = m_TotalCases
-    'Write the case name
-        WS.Cells(m_SummaryNextRow, "E").Value = m_CurrentCaseName
-    'Write the assertion count
-        WS.Cells(m_SummaryNextRow, "F").Value = CaseAssertions
-    'Write the failure count
-        WS.Cells(m_SummaryNextRow, "G").Value = CaseFailures
-    'Write the pass / fail result
-        WS.Cells(m_SummaryNextRow, "H").Value = ResultText
+    'Write the compact worksheet summary row
+        With WS
+            .Cells(SummaryRow, "C").Value = m_RunTimestamp
+            .Cells(SummaryRow, "D").Value = m_TotalCases
+            .Cells(SummaryRow, "E").Value = m_CurrentCaseName
+            .Cells(SummaryRow, "F").Value = CaseAssertions
+            .Cells(SummaryRow, "G").Value = CaseFailures
+            .Cells(SummaryRow, "H").Value = ResultText
+        End With
 
 '------------------------------------------------------------------------------
 ' PRINT COMPACT CASE SUMMARY
@@ -883,384 +1274,8 @@ Private Sub Case_Finalize()
 ' ADVANCE POINTER
 '------------------------------------------------------------------------------
     'Advance the summary-row pointer
-        m_SummaryNextRow = m_SummaryNextRow + 1
+        m_SummaryNextRow = SummaryRow + 1
 
-End Sub
-
-Private Sub AssertTrue( _
-    ByVal Condition As Boolean, _
-    ByVal MessageText As String)
-'
-'==============================================================================
-'                                ASSERT TRUE
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Records a pass/fail assertion based on a Boolean condition
-'
-' WHY THIS EXISTS
-'   Most regression checks naturally reduce to a Boolean predicate. This helper
-'   centralizes assertion counting and failure logging while avoiding excessive
-'   Immediate Window noise from passing assertions
-'
-' INPUTS
-'   Condition
-'     Boolean result to evaluate
-'
-'   MessageText
-'     Human-readable assertion label
-'
-' RETURNS
-'   None
-'
-' BEHAVIOR
-'   - Increments the assertion counter
-'   - Does not print passing assertions
-'   - Records failing assertions in the worksheet log
-'
-' UPDATED
-'   2026-04-15
-'==============================================================================
-
-'------------------------------------------------------------------------------
-' UPDATE ASSERTION COUNT
-'------------------------------------------------------------------------------
-    'Increment the total assertion count
-        m_TotalAssertions = m_TotalAssertions + 1
-
-'------------------------------------------------------------------------------
-' RECORD FAILURE ONLY
-'------------------------------------------------------------------------------
-    'Exit quietly for passing assertions
-        If Condition Then Exit Sub
-    'Count one failing assertion
-        m_TotalFailures = m_TotalFailures + 1
-    'Write the failure detail to the worksheet log
-        LogFailureDetail "ASSERT", MessageText
-End Sub
-
-Private Sub AssertEqualLong( _
-    ByVal Expected As Long, _
-    ByVal Actual As Long, _
-    ByVal MessageText As String)
-'
-'==============================================================================
-'                             ASSERT EQUAL LONG
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Records a pass/fail assertion for Long equality
-'
-' WHY THIS EXISTS
-'   Many regression checks compare numeric IDs, counters, and enumerated Excel
-'   Application values that are naturally represented as Long
-'
-' INPUTS
-'   Expected
-'     Expected Long value
-'
-'   Actual
-'     Actual Long value
-'
-'   MessageText
-'     Human-readable assertion label
-'
-' RETURNS
-'   None
-'
-' BEHAVIOR
-'   Delegates to AssertTrue using a Long equality comparison
-'
-' UPDATED
-'   2026-03-30
-'==============================================================================
-
-'------------------------------------------------------------------------------
-' ASSERT EQUALITY
-'------------------------------------------------------------------------------
-    'Assert that the actual Long equals the expected Long
-        AssertTrue (Actual = Expected), _
-                   MessageText & " | expected=" & CStr(Expected) & _
-                   " actual=" & CStr(Actual)
-End Sub
-
-Private Sub AssertEqualBoolean( _
-    ByVal Expected As Boolean, _
-    ByVal Actual As Boolean, _
-    ByVal MessageText As String)
-'
-'==============================================================================
-'                           ASSERT EQUAL BOOLEAN
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Records a pass/fail assertion for Boolean equality
-'
-' WHY THIS EXISTS
-'   Several class and Application-state checks are Boolean in nature, such as:
-'     - StrictMode
-'     - HasActiveSession
-'     - TW_IsActive
-'     - ScreenUpdating
-'     - EnableEvents
-'     - DisplayAlerts
-'
-' INPUTS
-'   Expected
-'     Expected Boolean value
-'
-'   Actual
-'     Actual Boolean value
-'
-'   MessageText
-'     Human-readable assertion label
-'
-' RETURNS
-'   None
-'
-' BEHAVIOR
-'   Delegates to AssertTrue using a Boolean equality comparison
-'
-' UPDATED
-'   2026-03-30
-'==============================================================================
-
-'------------------------------------------------------------------------------
-' ASSERT EQUALITY
-'------------------------------------------------------------------------------
-    'Assert that the actual Boolean equals the expected Boolean
-        AssertTrue (Actual = Expected), _
-                   MessageText & " | expected=" & CStr(Expected) & _
-                   " actual=" & CStr(Actual)
-End Sub
-
-Private Sub AssertEqualString( _
-    ByVal Expected As String, _
-    ByVal Actual As String, _
-    ByVal MessageText As String)
-'
-'==============================================================================
-'                            ASSERT EQUAL STRING
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Records a pass/fail assertion for String equality
-'
-' WHY THIS EXISTS
-'   Method-name and text-reporting checks often require exact String comparison
-'
-' INPUTS
-'   Expected
-'     Expected String
-'
-'   Actual
-'     Actual String
-'
-'   MessageText
-'     Human-readable assertion label
-'
-' RETURNS
-'   None
-'
-' BEHAVIOR
-'   Delegates to AssertTrue using a String equality comparison
-'
-' UPDATED
-'   2026-03-30
-'==============================================================================
-
-'------------------------------------------------------------------------------
-' ASSERT EQUALITY
-'------------------------------------------------------------------------------
-    'Assert that the actual String equals the expected String
-        AssertTrue (Actual = Expected), _
-                   MessageText & " | expected=\" & Expected & _
-                   "\ actual=\" & Actual & "\"
-End Sub
-
-Private Sub AssertContainsString( _
-    ByVal SourceText As String, _
-    ByVal SubText As String, _
-    ByVal MessageText As String)
-'
-'==============================================================================
-'                          ASSERT CONTAINS STRING
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Records a pass/fail assertion that one String contains another
-'
-' WHY THIS EXISTS
-'   Several formatted reports are not suitable for exact equality checks, but
-'   they should still contain required semantic markers such as:
-'     - "milliseconds"
-'     - "seconds"
-'     - backend labels
-'
-' INPUTS
-'   SourceText
-'     Full text to inspect
-'
-'   SubText
-'     Required substring
-'
-'   MessageText
-'     Human-readable assertion label
-'
-' RETURNS
-'   None
-'
-' BEHAVIOR
-'   Delegates to AssertTrue using a case-insensitive substring search
-'
-' UPDATED
-'   2026-03-30
-'==============================================================================
-
-'------------------------------------------------------------------------------
-' ASSERT CONTAINS
-'------------------------------------------------------------------------------
-    'Assert that the source text contains the required substring
-        AssertTrue (InStr(1, SourceText, SubText, vbTextCompare) > 0), _
-                   MessageText & " | required=\" & SubText & " \ "
-End Sub
-
-Private Sub AssertApproxDouble( _
-    ByVal Expected As Double, _
-    ByVal Actual As Double, _
-    ByVal Tolerance As Double, _
-    ByVal MessageText As String)
-'
-'==============================================================================
-'                           ASSERT APPROX DOUBLE
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Records a pass/fail assertion for approximate Double equality
-'
-' WHY THIS EXISTS
-'   Floating-point timing values are often best compared within a tolerance
-'   rather than by exact equality
-'
-' INPUTS
-'   Expected
-'     Expected Double value
-'
-'   Actual
-'     Actual Double value
-'
-'   Tolerance
-'     Maximum allowed absolute difference
-'
-'   MessageText
-'     Human-readable assertion label
-'
-' RETURNS
-'   None
-'
-' BEHAVIOR
-'   Delegates to AssertTrue using:
-'
-'     Abs(Actual - Expected) <= Tolerance
-'
-' UPDATED
-'   2026-03-30
-'==============================================================================
-
-'------------------------------------------------------------------------------
-' ASSERT APPROXIMATE EQUALITY
-'------------------------------------------------------------------------------
-    'Assert that the absolute difference is within the requested tolerance
-        AssertTrue (Abs(Actual - Expected) <= Tolerance), _
-                   MessageText & " | expected=" & Format$(Expected, "0.000000000") & _
-                   " actual=" & Format$(Actual, "0.000000000") & _
-                   " tol=" & Format$(Tolerance, "0.000000000")
-End Sub
-
-Private Sub AssertInRangeDouble( _
-    ByVal LowerBound As Double, _
-    ByVal UpperBound As Double, _
-    ByVal Actual As Double, _
-    ByVal MessageText As String)
-'
-'==============================================================================
-'                           ASSERT INRANGE DOUBLE
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Records a pass/fail assertion that a Double lies within a closed interval
-'
-' WHY THIS EXISTS
-'   Pause and elapsed-time sanity tests are often best validated by acceptable
-'   lower/upper bounds rather than exact target values
-'
-' INPUTS
-'   LowerBound
-'     Minimum acceptable value
-'
-'   UpperBound
-'     Maximum acceptable value
-'
-'   Actual
-'     Actual measured value
-'
-'   MessageText
-'     Human-readable assertion label
-'
-' RETURNS
-'   None
-'
-' BEHAVIOR
-'   Delegates to AssertTrue using:
-'
-'     Actual >= LowerBound And Actual <= UpperBound
-'
-' UPDATED
-'   2026-03-30
-'==============================================================================
-
-'------------------------------------------------------------------------------
-' ASSERT RANGE
-'------------------------------------------------------------------------------
-    'Assert that the actual value lies within the closed interval
-        AssertTrue ((Actual >= LowerBound) And (Actual <= UpperBound)), _
-                   MessageText & " | range=[" & Format$(LowerBound, "0.000000000") & _
-                   ", " & Format$(UpperBound, "0.000000000") & _
-                   "] actual=" & Format$(Actual, "0.000000000")
-End Sub
-
-Private Sub AssertNonNegativeDouble( _
-    ByVal Actual As Double, _
-    ByVal MessageText As String)
-'
-'==============================================================================
-'                        ASSERT NONNEGATIVE DOUBLE
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Records a pass/fail assertion that a Double is nonnegative
-'
-' WHY THIS EXISTS
-'   Many timing and diagnostic values should never be negative, even when they
-'   are too coarse or too small to be meaningfully positive
-'
-' INPUTS
-'   Actual
-'     Actual Double value
-'
-'   MessageText
-'     Human-readable assertion label
-'
-' RETURNS
-'   None
-'
-' BEHAVIOR
-'   Delegates to AssertTrue using:
-'
-'     Actual >= 0#
-'
-' UPDATED
-'   2026-03-30
-'==============================================================================
-
-'------------------------------------------------------------------------------
-' ASSERT NONNEGATIVE
-'------------------------------------------------------------------------------
-    'Assert that the actual value is nonnegative
-        AssertTrue (Actual >= 0#), _
-                   MessageText & " | actual=" & Format$(Actual, "0.000000000")
 End Sub
 
 Private Sub LogFailureDetail( _
@@ -1276,8 +1291,8 @@ Private Sub LogFailureDetail( _
 '   Writes one detailed failure row to the worksheet log
 '
 ' WHY THIS EXISTS
-'   Failure details should be preserved in a structured, filterable medium
-'   rather than relying only on the Immediate Window
+'   Failure details are easier to review and filter on a worksheet than in the
+'   Immediate Window alone
 '
 ' INPUTS
 '   FailureType
@@ -1295,66 +1310,58 @@ Private Sub LogFailureDetail( _
 ' RETURNS
 '   None
 '
-' BEHAVIOR
-'   - Resolves the dedicated regression-log worksheet
-'   - Writes one row into the failure-detail section of the worksheet log
-'   - Writes optional error fields only when supplied
-'   - Advances the detail-row pointer
-'
-' ERROR POLICY
-'   Raises errors normally
-'
-' DEPENDENCIES
-'   - Suite_GetOrCreateLogSheet
-'
 ' UPDATED
-'   2026-04-17
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
     Dim WS                  As Worksheet    'Regression-log worksheet
+    Dim DetailRow           As Long         'Current detail-row target
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Resolve the regression-log worksheet
         Set WS = Suite_GetOrCreateLogSheet()
+    'Resolve the current detail-row target
+        DetailRow = m_DetailNextRow
 
 '------------------------------------------------------------------------------
 ' WRITE DETAIL ROW
 '------------------------------------------------------------------------------
-    'Write the run timestamp
-        WS.Cells(m_DetailNextRow, "I").Value = m_RunTimestamp
-    'Write the case number
-        WS.Cells(m_DetailNextRow, "J").Value = m_TotalCases
-    'Write the case name
-        WS.Cells(m_DetailNextRow, "K").Value = m_CurrentCaseName
-    'Write the failure type
-        WS.Cells(m_DetailNextRow, "L").Value = FailureType
-    'Write the failure message
-        WS.Cells(m_DetailNextRow, "M").Value = MessageText
-    'Write the optional error number when supplied
-        If Not IsMissing(ErrNumberIn) Then
-            If Not IsEmpty(ErrNumberIn) Then
-                WS.Cells(m_DetailNextRow, "N").Value = ErrNumberIn
-            End If
-        End If
-    'Write the optional error description when supplied
-        If Not IsMissing(ErrDescriptionIn) Then
-            If Not IsEmpty(ErrDescriptionIn) Then
-                WS.Cells(m_DetailNextRow, "O").Value = ErrDescriptionIn
-            End If
-        End If
+    'Write the detailed failure row to the worksheet log
+        With WS
+            .Cells(DetailRow, "I").Value = m_RunTimestamp
+            .Cells(DetailRow, "J").Value = m_TotalCases
+            .Cells(DetailRow, "K").Value = m_CurrentCaseName
+            .Cells(DetailRow, "L").Value = Trim$(FailureType)
+            .Cells(DetailRow, "M").Value = MessageText
+
+            'Write the optional error number when supplied
+                If Not IsMissing(ErrNumberIn) Then
+                    If Not IsEmpty(ErrNumberIn) Then
+                        .Cells(DetailRow, "N").Value = ErrNumberIn
+                    End If
+                End If
+
+            'Write the optional error description when supplied
+                If Not IsMissing(ErrDescriptionIn) Then
+                    If Not IsEmpty(ErrDescriptionIn) Then
+                        .Cells(DetailRow, "O").Value = ErrDescriptionIn
+                    End If
+                End If
+        End With
 
 '------------------------------------------------------------------------------
 ' ADVANCE POINTER
 '------------------------------------------------------------------------------
     'Advance the detail-row pointer
-        m_DetailNextRow = m_DetailNextRow + 1
+        m_DetailNextRow = DetailRow + 1
 
 End Sub
+
 Private Sub RecordUnexpectedError( _
     ByVal ProcName As String)
 '
@@ -1365,10 +1372,9 @@ Private Sub RecordUnexpectedError( _
 '   Records one unexpected test-case error as a suite failure
 '
 ' WHY THIS EXISTS
-'   A regression case may encounter an unexpected runtime error before reaching
-'   some or all of its explicit assertions. This helper converts that event into
-'   a recorded test failure and stores diagnostic information in the worksheet
-'   log
+'   A regression case may fail before reaching some or all of its explicit
+'   assertions. This helper converts that event into one recorded suite failure
+'   and stores diagnostic detail in the worksheet log
 '
 ' INPUTS
 '   ProcName
@@ -1377,13 +1383,8 @@ Private Sub RecordUnexpectedError( _
 ' RETURNS
 '   None
 '
-' BEHAVIOR
-'   - Increments the assertion counter by one
-'   - Increments the failure counter by one
-'   - Stores the procedure name, error number, and error description
-'
 ' UPDATED
-'   2026-04-15
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1391,7 +1392,6 @@ Private Sub RecordUnexpectedError( _
 '------------------------------------------------------------------------------
     'Count one synthetic assertion for the unexpected error event
         m_TotalAssertions = m_TotalAssertions + 1
-
     'Count one failure for the unexpected error event
         m_TotalFailures = m_TotalFailures + 1
 
@@ -1399,10 +1399,18 @@ Private Sub RecordUnexpectedError( _
 ' STORE DIAGNOSTIC
 '------------------------------------------------------------------------------
     'Write the unexpected error detail to the worksheet log
-        LogFailureDetail "ERROR", _
-                         "Unexpected error in " & ProcName, _
-                         Err.Number, _
-                         Err.Description
+        If Len(Trim$(ProcName)) = 0 Then
+            LogFailureDetail "ERROR", _
+                             "Unexpected error in (unknown procedure)", _
+                             Err.Number, _
+                             Err.Description
+        Else
+            LogFailureDetail "ERROR", _
+                             "Unexpected error in " & Trim$(ProcName), _
+                             Err.Number, _
+                             Err.Description
+        End If
+        
 End Sub
 
 Private Sub CaptureAppState( _
@@ -1415,8 +1423,8 @@ Private Sub CaptureAppState( _
 '   Captures the current Excel Application state used by TW regression tests
 '
 ' WHY THIS EXISTS
-'   TW tests need a precise before/after baseline for Application properties
-'   that are intentionally modified by the shared TW manager
+'   TW tests need a precise before/after baseline for the Application
+'   properties intentionally modified by the shared TW manager
 '
 ' INPUTS
 '   StateOut
@@ -1425,16 +1433,8 @@ Private Sub CaptureAppState( _
 ' RETURNS
 '   None
 '
-' BEHAVIOR
-'   Copies current Application values for:
-'     - ScreenUpdating
-'     - EnableEvents
-'     - DisplayAlerts
-'     - Calculation
-'     - Cursor
-'
 ' UPDATED
-'   2026-03-30
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1448,6 +1448,7 @@ Private Sub CaptureAppState( _
             StateOut.Calculation = .Calculation
             StateOut.Cursor = .Cursor
         End With
+
 End Sub
 
 Private Function DelayForTimingMethod( _
@@ -1462,8 +1463,8 @@ Private Function DelayForTimingMethod( _
 '
 ' WHY THIS EXISTS
 '   Different timing backends have different practical resolution
-'   characteristics. In particular, method 6 (Now() * 86400) is much coarser
-'   for test purposes than QPC
+'   characteristics. In particular, method 6 is much coarser for test purposes
+'   than the other timing methods
 '
 ' INPUTS
 '   iMethod
@@ -1473,12 +1474,8 @@ Private Function DelayForTimingMethod( _
 '   Double
 '     Suggested delay in seconds for regression tests
 '
-' BEHAVIOR
-'   - Returns 1.1 seconds for method 6
-'   - Returns 0.05 seconds for all other methods
-'
 ' UPDATED
-'   2026-03-30
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1492,6 +1489,7 @@ Private Function DelayForTimingMethod( _
 
     'Use a shorter delay for the remaining methods
         DelayForTimingMethod = 0.05
+
 End Function
 
 '
@@ -1520,63 +1518,64 @@ Private Sub Test_DefaultState()
 ' RETURNS
 '   None
 '
-' BEHAVIOR
-'   Verifies that a newly created instance starts with:
-'     - StrictMode = True
-'     - HasActiveSession = False
-'     - ActiveMethodID = 0
-'     - T1 = 0
-'     - T2 = 0
-'     - ET = 0
-'     - TW_IsActive = False
-'     - TW_ActiveSessionCount = 0
-'
 ' UPDATED
-'   2026-03-30
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim cPM As cPerformanceManager    'Class under test
+    Dim cPM                 As cPerformanceManager    'Class under test
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Start the regression case
         Case_Begin "Default constructor state"
-    'Create a fresh class instance
-        Set cPM = New cPerformanceManager
     'Enable case-level unexpected-error handling
         On Error GoTo CleanFail
+    'Create a fresh class instance
+        Set cPM = New cPerformanceManager
 
 '------------------------------------------------------------------------------
-' ASSERT
+' ASSERT DEFAULT STATE
 '------------------------------------------------------------------------------
     'Assert the default strict-mode state
-        AssertEqualBoolean True, cPM.StrictMode, "StrictMode defaults to True"
+        Test_Assert_EqualBoolean True, cPM.StrictMode, "StrictMode defaults to True"
     'Assert that no active timing session exists yet
-        AssertEqualBoolean False, cPM.HasActiveSession, "HasActiveSession defaults to False"
+        Test_Assert_EqualBoolean False, cPM.HasActiveSession, "HasActiveSession defaults to False"
     'Assert that no active method is bound yet
-        AssertEqualLong 0, cPM.ActiveMethodID, "ActiveMethodID defaults to 0"
+        Test_Assert_EqualLong 0, cPM.ActiveMethodID, "ActiveMethodID defaults to 0"
+
+'------------------------------------------------------------------------------
+' ASSERT DEFAULT TIMING CACHE
+'------------------------------------------------------------------------------
     'Assert the default raw/cached timing values
-        AssertApproxDouble 0#, cPM.T1, 0#, "T1 defaults to 0"
-        AssertApproxDouble 0#, cPM.T2, 0#, "T2 defaults to 0"
-        AssertApproxDouble 0#, cPM.ET, 0#, "ET defaults to 0"
+        Test_Assert_ApproxDouble 0#, cPM.T1, 0#, "T1 defaults to 0"
+    'Assert the default raw/cached timing values
+        Test_Assert_ApproxDouble 0#, cPM.T2, 0#, "T2 defaults to 0"
+    'Assert the default raw/cached timing values
+        Test_Assert_ApproxDouble 0#, cPM.ET, 0#, "ET defaults to 0"
+
+'------------------------------------------------------------------------------
+' ASSERT DEFAULT TW STATE
+'------------------------------------------------------------------------------
     'Assert that no TW session is active for the new instance
-        AssertEqualBoolean False, cPM.TW_IsActive, "TW_IsActive defaults to False"
+        Test_Assert_EqualBoolean False, cPM.TW_IsActive, "TW_IsActive defaults to False"
     'Assert that the shared TW manager is currently idle
-        AssertEqualLong 0, cPM.TW_ActiveSessionCount, "TW_ActiveSessionCount defaults to 0"
+        Test_Assert_EqualLong 0, cPM.TW_ActiveSessionCount, "TW_ActiveSessionCount defaults to 0"
 
 CleanExit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Release any environment changes held by the instance
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
         If Not cPM Is Nothing Then
             cPM.ResetEnvironment
             Set cPM = Nothing
         End If
+        On Error GoTo 0
 
     'Finalize the current case
         Case_Finalize
@@ -1589,8 +1588,9 @@ CleanFail:
 '------------------------------------------------------------------------------
     'Record the unexpected case-level error
         RecordUnexpectedError "Test_DefaultState"
+    'Continue through centralized cleanup
+        Resume CleanExit
 
-    Resume CleanExit
 End Sub
 
 Private Sub Test_MethodName_ValidIndices()
@@ -1605,47 +1605,53 @@ Private Sub Test_MethodName_ValidIndices()
 '   The method-name map is both a public diagnostic surface and a documentation
 '   contract for the class
 '
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
 ' UPDATED
-'   2026-04-15
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim cPM As cPerformanceManager    'Class under test
+    Dim cPM                 As cPerformanceManager    'Class under test
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Start the regression case
         Case_Begin "MethodName valid indices"
-
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
     'Create a fresh class instance
         Set cPM = New cPerformanceManager
 
-    'Enable case-level unexpected-error handling
-        On Error GoTo CleanFail
-
 '------------------------------------------------------------------------------
-' ASSERT
+' ASSERT METHOD LABELS
 '------------------------------------------------------------------------------
     'Assert each documented method label exactly
-        AssertEqualString "Timer", cPM.MethodName(1), "MethodName(1)"
-        AssertEqualString "GetTickCount / GetTickCount64", cPM.MethodName(2), "MethodName(2)"
-        AssertEqualString "timeGetTime", cPM.MethodName(3), "MethodName(3)"
-        AssertEqualString "timeGetSystemTime", cPM.MethodName(4), "MethodName(4)"
-        AssertEqualString "QPC", cPM.MethodName(5), "MethodName(5)"
-        AssertEqualString "Now()", cPM.MethodName(6), "MethodName(6)"
+        Test_Assert_EqualString "Timer", cPM.MethodName(1), "MethodName(1)"
+        Test_Assert_EqualString "GetTickCount / GetTickCount64", cPM.MethodName(2), "MethodName(2)"
+        Test_Assert_EqualString "timeGetTime", cPM.MethodName(3), "MethodName(3)"
+        Test_Assert_EqualString "timeGetSystemTime", cPM.MethodName(4), "MethodName(4)"
+        Test_Assert_EqualString "QPC", cPM.MethodName(5), "MethodName(5)"
+        Test_Assert_EqualString "Now()", cPM.MethodName(6), "MethodName(6)"
 
 CleanExit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Release the class instance
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
         If Not cPM Is Nothing Then
             cPM.ResetEnvironment
             Set cPM = Nothing
         End If
+        On Error GoTo 0
 
     'Finalize the current case
         Case_Finalize
@@ -1658,8 +1664,9 @@ CleanFail:
 '------------------------------------------------------------------------------
     'Record the unexpected case-level error
         RecordUnexpectedError "Test_MethodName_ValidIndices"
+    'Continue through centralized cleanup
+        Resume CleanExit
 
-    Resume CleanExit
 End Sub
 
 Private Sub Test_MethodName_InvalidIndices()
@@ -1674,45 +1681,51 @@ Private Sub Test_MethodName_InvalidIndices()
 '   The class documents that invalid MethodName indices should return
 '   vbNullString rather than raising or returning misleading text
 '
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
 ' UPDATED
-'   2026-03-30
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim cPM As cPerformanceManager    'Class under test
+    Dim cPM                 As cPerformanceManager    'Class under test
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Start the regression case
         Case_Begin "MethodName invalid indices"
-
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
     'Create a fresh class instance
         Set cPM = New cPerformanceManager
 
-    'Enable case-level unexpected-error handling
-        On Error GoTo CleanFail
-
 '------------------------------------------------------------------------------
-' ASSERT
+' ASSERT INVALID INDICES
 '------------------------------------------------------------------------------
     'Assert vbNullString for representative invalid indices
-        AssertEqualString vbNullString, cPM.MethodName(0), "MethodName(0)"
-        AssertEqualString vbNullString, cPM.MethodName(-1), "MethodName(-1)"
-        AssertEqualString vbNullString, cPM.MethodName(7), "MethodName(7)"
-        AssertEqualString vbNullString, cPM.MethodName(99), "MethodName(99)"
+        Test_Assert_EqualString vbNullString, cPM.MethodName(0), "MethodName(0)"
+        Test_Assert_EqualString vbNullString, cPM.MethodName(-1), "MethodName(-1)"
+        Test_Assert_EqualString vbNullString, cPM.MethodName(7), "MethodName(7)"
+        Test_Assert_EqualString vbNullString, cPM.MethodName(99), "MethodName(99)"
 
 CleanExit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Release the class instance
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
         If Not cPM Is Nothing Then
             cPM.ResetEnvironment
             Set cPM = Nothing
         End If
+        On Error GoTo 0
 
     'Finalize the current case
         Case_Finalize
@@ -1725,8 +1738,9 @@ CleanFail:
 '------------------------------------------------------------------------------
     'Record the unexpected case-level error
         RecordUnexpectedError "Test_MethodName_InvalidIndices"
+    'Continue through centralized cleanup
+        Resume CleanExit
 
-    Resume CleanExit
 End Sub
 
 Private Sub Test_StartTimer_SetsSessionState_AllMethods()
@@ -1741,30 +1755,34 @@ Private Sub Test_StartTimer_SetsSessionState_AllMethods()
 '   StartTimer is the root of the session-bound timing model. A regression in
 '   this area undermines elapsed-time validity across the whole class
 '
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
 ' UPDATED
-'   2026-03-30
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim cPM     As cPerformanceManager    'Class under test
-    Dim iMethod As Integer                'Timing backend index
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim iMethod             As Integer                'Timing backend index
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Start the regression case
         Case_Begin "StartTimer sets session state for all methods"
-
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
     'Create a fresh class instance
         Set cPM = New cPerformanceManager
 
-    'Enable case-level unexpected-error handling
-        On Error GoTo CleanFail
-
 '------------------------------------------------------------------------------
-' ASSERT
+' ASSERT SESSION STATE ACROSS METHODS
 '------------------------------------------------------------------------------
     'Iterate over every documented timing backend
         For iMethod = 1 To 6
@@ -1773,31 +1791,34 @@ Private Sub Test_StartTimer_SetsSessionState_AllMethods()
                 cPM.StartTimer iMethod, False
 
             'Assert that a session is now active
-                AssertEqualBoolean True, cPM.HasActiveSession, _
-                                   "HasActiveSession after StartTimer(" & CStr(iMethod) & ")"
+                Test_Assert_EqualBoolean True, cPM.HasActiveSession, _
+                                         "HasActiveSession after StartTimer(" & CStr(iMethod) & ")"
 
             'Assert that the active method ID matches the requested method
-                AssertEqualLong iMethod, cPM.ActiveMethodID, _
-                                "ActiveMethodID after StartTimer(" & CStr(iMethod) & ")"
+                Test_Assert_EqualLong iMethod, cPM.ActiveMethodID, _
+                                      "ActiveMethodID after StartTimer(" & CStr(iMethod) & ")"
 
             'Assert that the method name is available for the active method
-                AssertTrue (Len(cPM.MethodName(cPM.ActiveMethodID)) > 0), _
-                           "MethodName available after StartTimer(" & CStr(iMethod) & ")"
+                Test_Assert_True (Len(cPM.MethodName(cPM.ActiveMethodID)) > 0), _
+                                 "MethodName available after StartTimer(" & CStr(iMethod) & ")"
 
             'Assert that the raw start capture is nonnegative
-                AssertNonNegativeDouble cPM.T1, _
-                                        "T1 nonnegative after StartTimer(" & CStr(iMethod) & ")"
+                Test_Assert_NonNegativeDouble cPM.T1, _
+                                              "T1 nonnegative after StartTimer(" & CStr(iMethod) & ")"
+
         Next iMethod
 
 CleanExit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Release any environment changes held by the instance
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
         If Not cPM Is Nothing Then
             cPM.ResetEnvironment
             Set cPM = Nothing
         End If
+        On Error GoTo 0
 
     'Finalize the current case
         Case_Finalize
@@ -1810,8 +1831,9 @@ CleanFail:
 '------------------------------------------------------------------------------
     'Record the unexpected case-level error
         RecordUnexpectedError "Test_StartTimer_SetsSessionState_AllMethods"
+    'Continue through centralized cleanup
+        Resume CleanExit
 
-    Resume CleanExit
 End Sub
 
 Private Sub Test_ElapsedSeconds_AllMethods()
@@ -1826,32 +1848,36 @@ Private Sub Test_ElapsedSeconds_AllMethods()
 '   Numeric elapsed-time retrieval is the central timing output of the class and
 '   must behave sensibly across all documented backends
 '
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
 ' UPDATED
-'   2026-03-30
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim cPM         As cPerformanceManager    'Class under test
-    Dim iMethod     As Integer                'Timing backend index
-    Dim DelayS      As Double                 'Requested delay in seconds
-    Dim ElapsedS    As Double                 'Measured elapsed seconds
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim iMethod             As Integer                'Timing backend index
+    Dim DelayS              As Double                 'Requested delay in seconds
+    Dim ElapsedS            As Double                 'Measured elapsed seconds
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Start the regression case
         Case_Begin "ElapsedSeconds across all methods"
-
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
     'Create a fresh class instance
         Set cPM = New cPerformanceManager
 
-    'Enable case-level unexpected-error handling
-        On Error GoTo CleanFail
-
 '------------------------------------------------------------------------------
-' ASSERT
+' ASSERT ELAPSED-TIME BEHAVIOR ACROSS METHODS
 '------------------------------------------------------------------------------
     'Iterate over every documented timing backend
         For iMethod = 1 To 6
@@ -1869,23 +1895,26 @@ Private Sub Test_ElapsedSeconds_AllMethods()
                 ElapsedS = cPM.ElapsedSeconds(iMethod)
 
             'Assert that the numeric elapsed time is nonnegative
-                AssertNonNegativeDouble ElapsedS, _
-                                        "ElapsedSeconds nonnegative for method " & CStr(iMethod)
+                Test_Assert_NonNegativeDouble ElapsedS, _
+                                              "ElapsedSeconds nonnegative for method " & CStr(iMethod)
 
             'Assert that the measured value is meaningfully positive relative to the delay
-                AssertTrue (ElapsedS >= (DelayS / 4#)), _
-                           "ElapsedSeconds meaningfully positive for method " & CStr(iMethod)
+                Test_Assert_True (ElapsedS >= (DelayS / 4#)), _
+                                 "ElapsedSeconds meaningfully positive for method " & CStr(iMethod)
+
         Next iMethod
 
 CleanExit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Release any environment changes held by the instance
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
         If Not cPM Is Nothing Then
             cPM.ResetEnvironment
             Set cPM = Nothing
         End If
+        On Error GoTo 0
 
     'Finalize the current case
         Case_Finalize
@@ -1898,8 +1927,9 @@ CleanFail:
 '------------------------------------------------------------------------------
     'Record the unexpected case-level error
         RecordUnexpectedError "Test_ElapsedSeconds_AllMethods"
+    'Continue through centralized cleanup
+        Resume CleanExit
 
-    Resume CleanExit
 End Sub
 
 Private Sub Test_ElapsedTime_AllMethods()
@@ -1914,30 +1944,36 @@ Private Sub Test_ElapsedTime_AllMethods()
 '   ElapsedTime is the public display/reporting companion to ElapsedSeconds and
 '   should return readable, semantically complete output for every backend
 '
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
 ' UPDATED
-'   2026-03-30
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim cPM         As cPerformanceManager    'Class under test
-    Dim iMethod     As Integer                'Timing backend index
-    Dim DelayS      As Double                 'Requested delay in seconds
-    Dim TextOut     As String                 'Formatted elapsed-time output
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim iMethod             As Integer                'Timing backend index
+    Dim DelayS              As Double                 'Requested delay in seconds
+    Dim TextOut             As String                 'Formatted elapsed-time output
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Start the regression case
         Case_Begin "ElapsedTime across all methods"
-    'Create a fresh class instance
-        Set cPM = New cPerformanceManager
     'Enable case-level unexpected-error handling
         On Error GoTo CleanFail
+    'Create a fresh class instance
+        Set cPM = New cPerformanceManager
 
 '------------------------------------------------------------------------------
-' ASSERT
+' ASSERT FORMATTED ELAPSED-TIME OUTPUT ACROSS METHODS
 '------------------------------------------------------------------------------
     'Iterate over every documented timing backend
         For iMethod = 1 To 6
@@ -1950,29 +1986,28 @@ Private Sub Test_ElapsedTime_AllMethods()
             'Read formatted elapsed time
                 TextOut = cPM.ElapsedTime(iMethod)
             'Assert that the formatted string is non-empty
-                AssertTrue (Len(TextOut) > 0), _
-                           "ElapsedTime non-empty for method " & CStr(iMethod)
+                Test_Assert_True (Len(TextOut) > 0), _
+                                 "ElapsedTime non-empty for method " & CStr(iMethod)
             'Assert that the formatted string contains each documented unit group
-                AssertContainsString TextOut, "milliseconds", _
-                                     "ElapsedTime contains milliseconds for method " & CStr(iMethod)
-
-                AssertContainsString TextOut, "microseconds", _
-                                     "ElapsedTime contains microseconds for method " & CStr(iMethod)
-
-                AssertContainsString TextOut, "nanoseconds", _
-                                     "ElapsedTime contains nanoseconds for method " & CStr(iMethod)
+                Test_Assert_ContainsString TextOut, "milliseconds", _
+                                           "ElapsedTime contains milliseconds for method " & CStr(iMethod)
+                Test_Assert_ContainsString TextOut, "microseconds", _
+                                           "ElapsedTime contains microseconds for method " & CStr(iMethod)
+                Test_Assert_ContainsString TextOut, "nanoseconds", _
+                                           "ElapsedTime contains nanoseconds for method " & CStr(iMethod)
         Next iMethod
 
 CleanExit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Release any environment changes held by the instance
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
         If Not cPM Is Nothing Then
             cPM.ResetEnvironment
             Set cPM = Nothing
         End If
-
+        On Error GoTo 0
     'Finalize the current case
         Case_Finalize
 
@@ -1984,10 +2019,10 @@ CleanFail:
 '------------------------------------------------------------------------------
     'Record the unexpected case-level error
         RecordUnexpectedError "Test_ElapsedTime_AllMethods"
+    'Continue through centralized cleanup
+        Resume CleanExit
 
-    Resume CleanExit
 End Sub
-
 Private Sub Test_ElapsedTime_FormatExistingSeconds()
 '
 '==============================================================================
@@ -1998,75 +2033,98 @@ Private Sub Test_ElapsedTime_FormatExistingSeconds()
 '   elapsed-seconds value without taking a second timing sample
 '
 ' WHY THIS EXISTS
-'   The class now supports formatting an existing elapsed-seconds value directly.
-'   That behavior avoids double measurement in callers that already captured
-'   ElapsedSeconds() separately for logging or further numeric processing
+'   This behavior avoids double measurement in callers that already captured
+'   ElapsedSeconds separately for logging or further numeric processing
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
 '
 ' UPDATED
-'   2026-04-15
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim cPM         As cPerformanceManager    'Class under test
-    Dim ElapsedS    As Double                 'Measured elapsed seconds
-    Dim TextOut     As String                 'Formatted elapsed-time output
-    Dim T2Before    As Double                 'Cached raw end timestamp before formatting
-    Dim ETBefore    As Double                 'Cached elapsed seconds before formatting
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim ElapsedS            As Double                 'Measured elapsed seconds
+    Dim TextOut             As String                 'Formatted elapsed-time output
+    Dim T2Before            As Double                 'Cached raw end timestamp before formatting
+    Dim ETBefore            As Double                 'Cached elapsed seconds before formatting
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Start the regression case
         Case_Begin "ElapsedTime formats an existing elapsed-seconds value"
-
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
     'Create a fresh class instance
         Set cPM = New cPerformanceManager
 
-    'Enable case-level unexpected-error handling
-        On Error GoTo CleanFail
-
 '------------------------------------------------------------------------------
-' ASSERT
+' PREPARE MEASURED ELAPSED VALUE
 '------------------------------------------------------------------------------
     'Start a QPC timing session
         cPM.StartTimer 5, False
-
     'Perform a short pause
         cPM.Pause 0.05, 1
-
     'Measure elapsed time numerically once
         ElapsedS = cPM.ElapsedSeconds(5)
 
-    'Capture T2 and ET before formatting-only use
+'------------------------------------------------------------------------------
+' CAPTURE PRE-FORMATTING STATE
+'------------------------------------------------------------------------------
+    'Capture T2 before formatting-only use
         T2Before = cPM.T2
+    'Capture ET before formatting-only use
         ETBefore = cPM.ET
 
+'------------------------------------------------------------------------------
+' FORMAT EXISTING ELAPSED VALUE
+'------------------------------------------------------------------------------
     'Format the existing elapsed-seconds value directly
         TextOut = cPM.ElapsedTime(, ElapsedS)
 
+'------------------------------------------------------------------------------
+' ASSERT FORMATTED OUTPUT
+'------------------------------------------------------------------------------
     'Assert that the formatted string is non-empty
-        AssertTrue (Len(TextOut) > 0), "ElapsedTime(, ElapsedSecondsIn) returns non-empty text"
+        Test_Assert_True (Len(TextOut) > 0), _
+                         "ElapsedTime(, ElapsedSecondsIn) returns non-empty text"
 
     'Assert that the formatted string contains the documented unit groups
-        AssertContainsString TextOut, "milliseconds", "ElapsedTime(, ElapsedSecondsIn) contains milliseconds"
-        AssertContainsString TextOut, "microseconds", "ElapsedTime(, ElapsedSecondsIn) contains microseconds"
-        AssertContainsString TextOut, "nanoseconds", "ElapsedTime(, ElapsedSecondsIn) contains nanoseconds"
+        Test_Assert_ContainsString TextOut, "milliseconds", _
+                                   "ElapsedTime(, ElapsedSecondsIn) contains milliseconds"
+        Test_Assert_ContainsString TextOut, "microseconds", _
+                                   "ElapsedTime(, ElapsedSecondsIn) contains microseconds"
+        Test_Assert_ContainsString TextOut, "nanoseconds", _
+                                   "ElapsedTime(, ElapsedSecondsIn) contains nanoseconds"
 
+'------------------------------------------------------------------------------
+' ASSERT NO NEW TIMING SAMPLE
+'------------------------------------------------------------------------------
     'Assert that formatting-only use does not take a new timing sample
-        AssertApproxDouble T2Before, cPM.T2, 0#, "T2 unchanged when ElapsedTime formats an existing elapsed value"
-        AssertApproxDouble ETBefore, cPM.ET, 0#, "ET unchanged when ElapsedTime formats an existing elapsed value"
+        Test_Assert_ApproxDouble T2Before, cPM.T2, 0#, _
+                                 "T2 unchanged when ElapsedTime formats an existing elapsed value"
+    'Assert that formatting-only use does not update the cached elapsed value
+        Test_Assert_ApproxDouble ETBefore, cPM.ET, 0#, _
+                                 "ET unchanged when ElapsedTime formats an existing elapsed value"
 
 CleanExit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Release any environment changes held by the instance
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
         If Not cPM Is Nothing Then
             cPM.ResetEnvironment
             Set cPM = Nothing
         End If
+        On Error GoTo 0
 
     'Finalize the current case
         Case_Finalize
@@ -2079,8 +2137,9 @@ CleanFail:
 '------------------------------------------------------------------------------
     'Record the unexpected case-level error
         RecordUnexpectedError "Test_ElapsedTime_FormatExistingSeconds"
+    'Continue through centralized cleanup
+        Resume CleanExit
 
-    Resume CleanExit
 End Sub
 
 Private Sub Test_AlignedStart_AllMethods()
@@ -2095,67 +2154,66 @@ Private Sub Test_AlignedStart_AllMethods()
 '   AlignToNextTick is a specialized benchmark feature and should still behave
 '   sanely across all documented backends
 '
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
 ' UPDATED
-'   2026-03-30
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim cPM         As cPerformanceManager    'Class under test
-    Dim iMethod     As Integer                'Timing backend index
-    Dim DelayS      As Double                 'Requested delay in seconds
-    Dim ElapsedS    As Double                 'Measured elapsed seconds
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim iMethod             As Integer                'Timing backend index
+    Dim DelayS              As Double                 'Requested delay in seconds
+    Dim ElapsedS            As Double                 'Measured elapsed seconds
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Start the regression case
         Case_Begin "AlignToNextTick across all methods"
-
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
     'Create a fresh class instance
         Set cPM = New cPerformanceManager
 
-    'Enable case-level unexpected-error handling
-        On Error GoTo CleanFail
-
 '------------------------------------------------------------------------------
-' ASSERT
+' ASSERT ALIGNED-START BEHAVIOR ACROSS METHODS
 '------------------------------------------------------------------------------
     'Iterate over every documented timing backend
         For iMethod = 1 To 6
-
             'Choose a practical per-method delay
                 DelayS = DelayForTimingMethod(iMethod)
-
             'Start a new aligned timing session
                 cPM.StartTimer iMethod, True
-
             'Perform a deliberate pause
                 cPM.Pause DelayS, 1
-
             'Read numeric elapsed time
                 ElapsedS = cPM.ElapsedSeconds(iMethod)
-
             'Assert that the aligned elapsed time is nonnegative
-                AssertNonNegativeDouble ElapsedS, _
-                                        "Aligned ElapsedSeconds nonnegative for method " & CStr(iMethod)
-
+                Test_Assert_NonNegativeDouble ElapsedS, _
+                                              "Aligned ElapsedSeconds nonnegative for method " & CStr(iMethod)
             'Assert that the aligned elapsed time is meaningfully positive
-                AssertTrue (ElapsedS >= (DelayS / 4#)), _
-                           "Aligned ElapsedSeconds meaningfully positive for method " & CStr(iMethod)
+                Test_Assert_True (ElapsedS >= (DelayS / 4#)), _
+                                 "Aligned ElapsedSeconds meaningfully positive for method " & CStr(iMethod)
         Next iMethod
 
 CleanExit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Release any environment changes held by the instance
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
         If Not cPM Is Nothing Then
             cPM.ResetEnvironment
             Set cPM = Nothing
         End If
-
+        On Error GoTo 0
     'Finalize the current case
         Case_Finalize
 
@@ -2167,10 +2225,10 @@ CleanFail:
 '------------------------------------------------------------------------------
     'Record the unexpected case-level error
         RecordUnexpectedError "Test_AlignedStart_AllMethods"
+    'Continue through centralized cleanup
+        Resume CleanExit
 
-    Resume CleanExit
 End Sub
-
 Private Sub Test_Accessors_QPC()
 '
 '==============================================================================
@@ -2183,60 +2241,72 @@ Private Sub Test_Accessors_QPC()
 '   T1, T2, and ET are explicit inspection/debugging surfaces and should remain
 '   coherent with the underlying elapsed measurement
 '
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
 ' UPDATED
-'   2026-03-30
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim cPM         As cPerformanceManager    'Class under test
-    Dim ElapsedS    As Double                 'Measured elapsed seconds
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim ElapsedS            As Double                 'Measured elapsed seconds
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Start the regression case
         Case_Begin "Accessors after QPC measurement"
-
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
     'Create a fresh class instance
         Set cPM = New cPerformanceManager
 
-    'Enable case-level unexpected-error handling
-        On Error GoTo CleanFail
-
 '------------------------------------------------------------------------------
-' ASSERT
+' PREPARE QPC MEASUREMENT
 '------------------------------------------------------------------------------
     'Start a QPC timing session
         cPM.StartTimer 5, False
-
     'Perform a short pause
         cPM.Pause 0.03, 1
-
     'Read numeric elapsed time through the public API
         ElapsedS = cPM.ElapsedSeconds(5)
 
+'------------------------------------------------------------------------------
+' ASSERT RAW ACCESSORS
+'------------------------------------------------------------------------------
     'Assert that the raw captures are nonnegative
-        AssertNonNegativeDouble cPM.T1, "T1 nonnegative after QPC measurement"
-        AssertNonNegativeDouble cPM.T2, "T2 nonnegative after QPC measurement"
-
+        Test_Assert_NonNegativeDouble cPM.T1, _
+                                      "T1 nonnegative after QPC measurement"
+        Test_Assert_NonNegativeDouble cPM.T2, _
+                                      "T2 nonnegative after QPC measurement"
     'Assert that the raw end capture is not earlier than the raw start capture
-        AssertTrue (cPM.T2 >= cPM.T1), "T2 >= T1 after QPC measurement"
+        Test_Assert_True (cPM.T2 >= cPM.T1), _
+                         "T2 >= T1 after QPC measurement"
 
+'------------------------------------------------------------------------------
+' ASSERT CACHED ELAPSED VALUE
+'------------------------------------------------------------------------------
     'Assert that ET mirrors the cached elapsed value
-        AssertApproxDouble ElapsedS, cPM.ET, 0.000000001, "ET matches ElapsedSeconds after QPC measurement"
+        Test_Assert_ApproxDouble ElapsedS, cPM.ET, 0.000000001, _
+                                 "ET matches ElapsedSeconds after QPC measurement"
 
 CleanExit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Release any environment changes held by the instance
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
         If Not cPM Is Nothing Then
             cPM.ResetEnvironment
             Set cPM = Nothing
         End If
-
+        On Error GoTo 0
     'Finalize the current case
         Case_Finalize
 
@@ -2248,8 +2318,9 @@ CleanFail:
 '------------------------------------------------------------------------------
     'Record the unexpected case-level error
         RecordUnexpectedError "Test_Accessors_QPC"
+    'Continue through centralized cleanup
+        Resume CleanExit
 
-    Resume CleanExit
 End Sub
 
 Private Sub Test_StrictMode_ElapsedBeforeStart()
@@ -2265,33 +2336,36 @@ Private Sub Test_StrictMode_ElapsedBeforeStart()
 '   Calling ElapsedSeconds before a timing session exists is a fundamental
 '   contract violation that strict mode must reject
 '
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
 ' UPDATED
-'   2026-03-30
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim cPM         As cPerformanceManager    'Class under test
-    Dim Dummy       As Double                 'Throwaway target for the failing call
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim Dummy               As Double                 'Throwaway target for the failing call
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Start the regression case
         Case_Begin "StrictMode: ElapsedSeconds before StartTimer"
-
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
     'Create a fresh class instance
         Set cPM = New cPerformanceManager
-
     'Force strict mode explicitly for clarity
         cPM.StrictMode = True
 
-    'Enable case-level unexpected-error handling
-        On Error GoTo CleanFail
-
 '------------------------------------------------------------------------------
-' ASSERT
+' ASSERT STRICT-MODE FAILURE
 '------------------------------------------------------------------------------
     'Switch to local expected-error handling
         On Error Resume Next
@@ -2300,11 +2374,12 @@ Private Sub Test_StrictMode_ElapsedBeforeStart()
         Dummy = cPM.ElapsedSeconds
 
     'Assert that an error was raised
-        AssertTrue (Err.Number <> 0), "Strict mode raises when ElapsedSeconds is called before StartTimer"
+        Test_Assert_True (Err.Number <> 0), _
+                         "Strict mode raises when ElapsedSeconds is called before StartTimer"
 
     'Assert that the error description mentions StartTimer
-        AssertContainsString Err.Description, "StartTimer", _
-                             "Strict-mode error text mentions StartTimer"
+        Test_Assert_ContainsString Err.Description, "StartTimer", _
+                                   "Strict-mode error text mentions StartTimer"
 
     'Clear the expected error state
         Err.Clear
@@ -2316,11 +2391,13 @@ CleanExit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Release any environment changes held by the instance
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
         If Not cPM Is Nothing Then
             cPM.ResetEnvironment
             Set cPM = Nothing
         End If
+        On Error GoTo 0
 
     'Finalize the current case
         Case_Finalize
@@ -2333,8 +2410,9 @@ CleanFail:
 '------------------------------------------------------------------------------
     'Record the unexpected case-level error
         RecordUnexpectedError "Test_StrictMode_ElapsedBeforeStart"
+    'Continue through centralized cleanup
+        Resume CleanExit
 
-    Resume CleanExit
 End Sub
 
 Private Sub Test_StrictMode_MethodMismatch()
@@ -2350,39 +2428,40 @@ Private Sub Test_StrictMode_MethodMismatch()
 '   to read elapsed time with a method different from the one that started the
 '   session
 '
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
 ' UPDATED
-'   2026-03-30
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim cPM         As cPerformanceManager    'Class under test
-    Dim Dummy       As Double                 'Throwaway target for the failing call
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim Dummy               As Double                 'Throwaway target for the failing call
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Start the regression case
         Case_Begin "StrictMode: explicit elapsed-method mismatch"
-
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
     'Create a fresh class instance
         Set cPM = New cPerformanceManager
-
     'Force strict mode explicitly for clarity
         cPM.StrictMode = True
-
     'Start a session with method 1
         cPM.StartTimer 1, False
-
     'Perform a short pause so the session is live
         cPM.Pause 0.05, 1
 
-    'Enable case-level unexpected-error handling
-        On Error GoTo CleanFail
-
 '------------------------------------------------------------------------------
-' ASSERT
+' ASSERT STRICT-MODE FAILURE
 '------------------------------------------------------------------------------
     'Switch to local expected-error handling
         On Error Resume Next
@@ -2391,11 +2470,12 @@ Private Sub Test_StrictMode_MethodMismatch()
         Dummy = cPM.ElapsedSeconds(2)
 
     'Assert that an error was raised
-        AssertTrue (Err.Number <> 0), "Strict mode raises on explicit elapsed-method mismatch"
+        Test_Assert_True (Err.Number <> 0), _
+                         "Strict mode raises on explicit elapsed-method mismatch"
 
     'Assert that the error description mentions the method mismatch
-        AssertContainsString Err.Description, "does not match", _
-                             "Strict-mode mismatch error text is informative"
+        Test_Assert_ContainsString Err.Description, "does not match", _
+                                   "Strict-mode mismatch error text is informative"
 
     'Clear the expected error state
         Err.Clear
@@ -2407,11 +2487,13 @@ CleanExit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Release any environment changes held by the instance
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
         If Not cPM Is Nothing Then
             cPM.ResetEnvironment
             Set cPM = Nothing
         End If
+        On Error GoTo 0
 
     'Finalize the current case
         Case_Finalize
@@ -2424,8 +2506,9 @@ CleanFail:
 '------------------------------------------------------------------------------
     'Record the unexpected case-level error
         RecordUnexpectedError "Test_StrictMode_MethodMismatch"
+    'Continue through centralized cleanup
+        Resume CleanExit
 
-    Resume CleanExit
 End Sub
 
 Private Sub Test_StrictMode_InvalidStartMethod()
@@ -2440,32 +2523,35 @@ Private Sub Test_StrictMode_InvalidStartMethod()
 '   StartTimer should fail fast in strict mode when the caller passes an invalid
 '   method identifier
 '
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
 ' UPDATED
-'   2026-03-30
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim cPM As cPerformanceManager    'Class under test
+    Dim cPM                 As cPerformanceManager    'Class under test
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Start the regression case
         Case_Begin "StrictMode: invalid StartTimer method"
-
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
     'Create a fresh class instance
         Set cPM = New cPerformanceManager
-
     'Force strict mode explicitly for clarity
         cPM.StrictMode = True
 
-    'Enable case-level unexpected-error handling
-        On Error GoTo CleanFail
-
 '------------------------------------------------------------------------------
-' ASSERT
+' ASSERT STRICT-MODE FAILURE
 '------------------------------------------------------------------------------
     'Switch to local expected-error handling
         On Error Resume Next
@@ -2474,11 +2560,12 @@ Private Sub Test_StrictMode_InvalidStartMethod()
         cPM.StartTimer 99, False
 
     'Assert that an error was raised
-        AssertTrue (Err.Number <> 0), "Strict mode raises on invalid StartTimer method"
+        Test_Assert_True (Err.Number <> 0), _
+                         "Strict mode raises on invalid StartTimer method"
 
     'Assert that the error description mentions invalid timer method
-        AssertContainsString Err.Description, "Invalid timer method", _
-                             "Strict-mode invalid-start error text is informative"
+        Test_Assert_ContainsString Err.Description, "Invalid timer method", _
+                                   "Strict-mode invalid-start error text is informative"
 
     'Clear the expected error state
         Err.Clear
@@ -2490,11 +2577,13 @@ CleanExit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Release any environment changes held by the instance
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
         If Not cPM Is Nothing Then
             cPM.ResetEnvironment
             Set cPM = Nothing
         End If
+        On Error GoTo 0
 
     'Finalize the current case
         Case_Finalize
@@ -2507,8 +2596,9 @@ CleanFail:
 '------------------------------------------------------------------------------
     'Record the unexpected case-level error
         RecordUnexpectedError "Test_StrictMode_InvalidStartMethod"
+    'Continue through centralized cleanup
+        Resume CleanExit
 
-    Resume CleanExit
 End Sub
 
 Private Sub Test_NonStrictMode_InvalidStartFallback()
@@ -2523,50 +2613,59 @@ Private Sub Test_NonStrictMode_InvalidStartFallback()
 '   In non-strict mode the class documents that invalid start-method inputs are
 '   coerced toward a usable backend rather than immediately rejected
 '
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
 ' UPDATED
-'   2026-03-30
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim cPM         As cPerformanceManager    'Class under test
-    Dim DelayS      As Double                 'Requested delay in seconds
-    Dim ElapsedS    As Double                 'Measured elapsed seconds
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim DelayS              As Double                 'Requested delay in seconds
+    Dim ElapsedS            As Double                 'Measured elapsed seconds
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Start the regression case
         Case_Begin "NonStrictMode: invalid StartTimer fallback"
-
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
     'Create a fresh class instance
         Set cPM = New cPerformanceManager
-
     'Force non-strict mode
         cPM.StrictMode = False
 
-    'Enable case-level unexpected-error handling
-        On Error GoTo CleanFail
-
+'------------------------------------------------------------------------------
+' APPLY NON-STRICT FALLBACK
+'------------------------------------------------------------------------------
     'Call StartTimer with an invalid method
         cPM.StartTimer 99, False
 
 '------------------------------------------------------------------------------
-' ASSERT
+' ASSERT FALLBACK SESSION STATE
 '------------------------------------------------------------------------------
     'Assert that a session is active after fallback
-        AssertEqualBoolean True, cPM.HasActiveSession, _
-                           "Non-strict invalid StartTimer still establishes a session"
+        Test_Assert_EqualBoolean True, cPM.HasActiveSession, _
+                                 "Non-strict invalid StartTimer still establishes a session"
 
     'Assert that the resolved active method is valid
-        AssertTrue ((cPM.ActiveMethodID = 5) Or (cPM.ActiveMethodID = 2)), _
-                   "Non-strict invalid StartTimer resolves to method 5 or 2"
+        Test_Assert_True ((cPM.ActiveMethodID = 5) Or (cPM.ActiveMethodID = 2)), _
+                         "Non-strict invalid StartTimer resolves to method 5 or 2"
 
     'Assert that the resolved active method has a non-empty name
-        AssertTrue (Len(cPM.MethodName(cPM.ActiveMethodID)) > 0), _
-                   "Resolved fallback method has a valid MethodName"
+        Test_Assert_True (Len(cPM.MethodName(cPM.ActiveMethodID)) > 0), _
+                         "Resolved fallback method has a valid MethodName"
 
+'------------------------------------------------------------------------------
+' ASSERT FALLBACK ELAPSED-TIME PATH
+'------------------------------------------------------------------------------
     'Choose a practical delay for the resolved backend
         DelayS = DelayForTimingMethod(cPM.ActiveMethodID)
 
@@ -2577,18 +2676,20 @@ Private Sub Test_NonStrictMode_InvalidStartFallback()
         ElapsedS = cPM.ElapsedSeconds
 
     'Assert that the fallback path produces a nonnegative elapsed value
-        AssertNonNegativeDouble ElapsedS, _
-                                "Non-strict fallback path returns nonnegative elapsed time"
+        Test_Assert_NonNegativeDouble ElapsedS, _
+                                      "Non-strict fallback path returns nonnegative elapsed time"
 
 CleanExit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Release any environment changes held by the instance
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
         If Not cPM Is Nothing Then
             cPM.ResetEnvironment
             Set cPM = Nothing
         End If
+        On Error GoTo 0
 
     'Finalize the current case
         Case_Finalize
@@ -2601,8 +2702,9 @@ CleanFail:
 '------------------------------------------------------------------------------
     'Record the unexpected case-level error
         RecordUnexpectedError "Test_NonStrictMode_InvalidStartFallback"
+    'Continue through centralized cleanup
+        Resume CleanExit
 
-    Resume CleanExit
 End Sub
 
 Private Sub Test_NonStrictMode_MethodMismatchFallback()
@@ -2618,60 +2720,70 @@ Private Sub Test_NonStrictMode_MethodMismatchFallback()
 '   Instead, the class should fall back to the active session method where
 '   allowed
 '
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
 ' UPDATED
-'   2026-03-30
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim cPM         As cPerformanceManager    'Class under test
-    Dim ElapsedS    As Double                 'Measured elapsed seconds
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim ElapsedS            As Double                 'Measured elapsed seconds
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Start the regression case
         Case_Begin "NonStrictMode: explicit elapsed-method mismatch fallback"
-
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
     'Create a fresh class instance
         Set cPM = New cPerformanceManager
-
     'Force non-strict mode
         cPM.StrictMode = False
 
-    'Enable case-level unexpected-error handling
-        On Error GoTo CleanFail
-
+'------------------------------------------------------------------------------
+' PREPARE SESSION
+'------------------------------------------------------------------------------
     'Start a session with method 1
         cPM.StartTimer 1, False
-
     'Perform a short pause
         cPM.Pause 0.05, 1
 
+'------------------------------------------------------------------------------
+' APPLY NON-STRICT FALLBACK
+'------------------------------------------------------------------------------
     'Request elapsed time with an explicit mismatched method
         ElapsedS = cPM.ElapsedSeconds(2)
 
 '------------------------------------------------------------------------------
-' ASSERT
+' ASSERT FALLBACK BEHAVIOR
 '------------------------------------------------------------------------------
     'Assert that the active method remains the original session method
-        AssertEqualLong 1, cPM.ActiveMethodID, _
-                        "ActiveMethodID remains unchanged after non-strict mismatch fallback"
+        Test_Assert_EqualLong 1, cPM.ActiveMethodID, _
+                              "ActiveMethodID remains unchanged after non-strict mismatch fallback"
 
     'Assert that the fallback elapsed value is nonnegative
-        AssertNonNegativeDouble ElapsedS, _
-                                "Non-strict mismatch fallback returns nonnegative elapsed time"
+        Test_Assert_NonNegativeDouble ElapsedS, _
+                                      "Non-strict mismatch fallback returns nonnegative elapsed time"
 
 CleanExit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Release any environment changes held by the instance
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
         If Not cPM Is Nothing Then
             cPM.ResetEnvironment
             Set cPM = Nothing
         End If
+        On Error GoTo 0
 
     'Finalize the current case
         Case_Finalize
@@ -2684,8 +2796,9 @@ CleanFail:
 '------------------------------------------------------------------------------
     'Record the unexpected case-level error
         RecordUnexpectedError "Test_NonStrictMode_MethodMismatchFallback"
+    'Continue through centralized cleanup
+        Resume CleanExit
 
-    Resume CleanExit
 End Sub
 
 Private Sub Test_OverheadMeasurement_Seconds()
@@ -2704,31 +2817,35 @@ Private Sub Test_OverheadMeasurement_Seconds()
 '   Coarse timing methods can legitimately report very small or zero overhead
 '   values, so this test asserts nonnegativity rather than strict positivity
 '
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
 ' UPDATED
-'   2026-03-30
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim cPM         As cPerformanceManager    'Class under test
-    Dim iMethod     As Integer                'Timing backend index
-    Dim OverheadS   As Double                 'Measured overhead in seconds
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim iMethod             As Integer                'Timing backend index
+    Dim OverheadS           As Double                 'Measured overhead in seconds
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Start the regression case
         Case_Begin "OverheadMeasurement_Seconds across all methods"
-
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
     'Create a fresh class instance
         Set cPM = New cPerformanceManager
 
-    'Enable case-level unexpected-error handling
-        On Error GoTo CleanFail
-
 '------------------------------------------------------------------------------
-' ASSERT
+' ASSERT OVERHEAD HELPERS ACROSS METHODS
 '------------------------------------------------------------------------------
     'Iterate over every documented timing backend
         For iMethod = 1 To 6
@@ -2737,19 +2854,22 @@ Private Sub Test_OverheadMeasurement_Seconds()
                 OverheadS = cPM.OverheadMeasurement_Seconds(iMethod, 25)
 
             'Assert that the reported overhead is nonnegative
-                AssertNonNegativeDouble OverheadS, _
-                                        "OverheadMeasurement_Seconds nonnegative for method " & CStr(iMethod)
+                Test_Assert_NonNegativeDouble OverheadS, _
+                                              "OverheadMeasurement_Seconds nonnegative for method " & CStr(iMethod)
+
         Next iMethod
 
 CleanExit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Release any environment changes held by the instance
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
         If Not cPM Is Nothing Then
             cPM.ResetEnvironment
             Set cPM = Nothing
         End If
+        On Error GoTo 0
 
     'Finalize the current case
         Case_Finalize
@@ -2762,8 +2882,9 @@ CleanFail:
 '------------------------------------------------------------------------------
     'Record the unexpected case-level error
         RecordUnexpectedError "Test_OverheadMeasurement_Seconds"
+    'Continue through centralized cleanup
+        Resume CleanExit
 
-    Resume CleanExit
 End Sub
 
 Private Sub Test_OverheadMeasurement_Text()
@@ -2778,31 +2899,35 @@ Private Sub Test_OverheadMeasurement_Text()
 '   The text-reporting companion to the numeric overhead helper should remain
 '   readable, non-empty, and semantically informative
 '
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
 ' UPDATED
-'   2026-04-15
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim cPM         As cPerformanceManager    'Class under test
-    Dim iMethod     As Integer                'Timing backend index
-    Dim TextOut     As String                 'Formatted overhead text
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim iMethod             As Integer                'Timing backend index
+    Dim TextOut             As String                 'Formatted overhead text
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Start the regression case
         Case_Begin "OverheadMeasurement_Text across all methods"
-
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
     'Create a fresh class instance
         Set cPM = New cPerformanceManager
 
-    'Enable case-level unexpected-error handling
-        On Error GoTo CleanFail
-
 '------------------------------------------------------------------------------
-' ASSERT
+' ASSERT OVERHEAD TEXT ACROSS METHODS
 '------------------------------------------------------------------------------
     'Iterate over every documented timing backend
         For iMethod = 1 To 6
@@ -2811,27 +2936,30 @@ Private Sub Test_OverheadMeasurement_Text()
                 TextOut = cPM.OverheadMeasurement_Text(iMethod, 25)
 
             'Assert that the formatted string is non-empty
-                AssertTrue (Len(TextOut) > 0), _
-                           "OverheadMeasurement_Text non-empty for method " & CStr(iMethod)
+                Test_Assert_True (Len(TextOut) > 0), _
+                                 "OverheadMeasurement_Text non-empty for method " & CStr(iMethod)
 
             'Assert that the backend label appears in the formatted string
-                AssertContainsString TextOut, cPM.MethodName(iMethod), _
-                                     "OverheadMeasurement_Text contains backend label for method " & CStr(iMethod)
+                Test_Assert_ContainsString TextOut, cPM.MethodName(iMethod), _
+                                           "OverheadMeasurement_Text contains backend label for method " & CStr(iMethod)
 
             'Assert that the formatted string mentions seconds
-                AssertContainsString TextOut, "seconds", _
-                                     "OverheadMeasurement_Text contains seconds for method " & CStr(iMethod)
+                Test_Assert_ContainsString TextOut, "seconds", _
+                                           "OverheadMeasurement_Text contains seconds for method " & CStr(iMethod)
+
         Next iMethod
 
 CleanExit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Release any environment changes held by the instance
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
         If Not cPM Is Nothing Then
             cPM.ResetEnvironment
             Set cPM = Nothing
         End If
+        On Error GoTo 0
 
     'Finalize the current case
         Case_Finalize
@@ -2844,8 +2972,9 @@ CleanFail:
 '------------------------------------------------------------------------------
     'Record the unexpected case-level error
         RecordUnexpectedError "Test_OverheadMeasurement_Text"
+    'Continue through centralized cleanup
+        Resume CleanExit
 
-    Resume CleanExit
 End Sub
 
 Private Sub Test_Diagnostics_Properties()
@@ -2860,60 +2989,76 @@ Private Sub Test_Diagnostics_Properties()
 '   The class exposes several human-readable and numeric diagnostics that are
 '   useful for environment inspection, troubleshooting, and documentation
 '
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
 ' UPDATED
-'   2026-03-30
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim cPM         As cPerformanceManager    'Class under test
-    Dim TextOut     As String                 'Diagnostic text
-    Dim QpcHz       As Double                 'Numeric QPC frequency
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim TextOut             As String                 'Diagnostic text
+    Dim QpcHz               As Double                 'Numeric QPC frequency
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Start the regression case
         Case_Begin "Diagnostic and informational properties"
-
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
     'Create a fresh class instance
         Set cPM = New cPerformanceManager
 
-    'Enable case-level unexpected-error handling
-        On Error GoTo CleanFail
-
 '------------------------------------------------------------------------------
-' ASSERT
+' ASSERT TEXT DIAGNOSTICS
 '------------------------------------------------------------------------------
     'Read and validate the nominal system tick-interval text
         TextOut = cPM.Get_SystemTickInterval
-        AssertTrue (Len(TextOut) > 0), "Get_SystemTickInterval is non-empty"
-        AssertContainsString TextOut, "Tick Interval", "Get_SystemTickInterval contains label text"
+        Test_Assert_True (Len(TextOut) > 0), _
+                         "Get_SystemTickInterval is non-empty"
+        Test_Assert_ContainsString TextOut, "Tick Interval", _
+                                   "Get_SystemTickInterval contains label text"
 
     'Read and validate the QPC tick-interval text
         TextOut = cPM.QPC_Get_SystemTickInterval
-        AssertTrue (Len(TextOut) > 0), "QPC_Get_SystemTickInterval is non-empty"
-        AssertContainsString TextOut, "QPC Tick interval", "QPC_Get_SystemTickInterval contains label text"
+        Test_Assert_True (Len(TextOut) > 0), _
+                         "QPC_Get_SystemTickInterval is non-empty"
+        Test_Assert_ContainsString TextOut, "QPC Tick interval", _
+                                   "QPC_Get_SystemTickInterval contains label text"
 
     'Read and validate the QPC frequency text
         TextOut = cPM.QPC_FrequencyPerSecond
-        AssertTrue (Len(TextOut) > 0), "QPC_FrequencyPerSecond is non-empty"
-        AssertContainsString TextOut, "QPC Tick frequency", "QPC_FrequencyPerSecond contains label text"
+        Test_Assert_True (Len(TextOut) > 0), _
+                         "QPC_FrequencyPerSecond is non-empty"
+        Test_Assert_ContainsString TextOut, "QPC Tick frequency", _
+                                   "QPC_FrequencyPerSecond contains label text"
 
+'------------------------------------------------------------------------------
+' ASSERT NUMERIC DIAGNOSTICS
+'------------------------------------------------------------------------------
     'Read and validate the numeric QPC frequency
         QpcHz = cPM.QPC_FrequencyPerSecond_Value
-        AssertNonNegativeDouble QpcHz, "QPC_FrequencyPerSecond_Value is nonnegative"
+        Test_Assert_NonNegativeDouble QpcHz, _
+                                      "QPC_FrequencyPerSecond_Value is nonnegative"
 
 CleanExit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Release any environment changes held by the instance
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
         If Not cPM Is Nothing Then
             cPM.ResetEnvironment
             Set cPM = Nothing
         End If
+        On Error GoTo 0
 
     'Finalize the current case
         Case_Finalize
@@ -2926,8 +3071,9 @@ CleanFail:
 '------------------------------------------------------------------------------
     'Record the unexpected case-level error
         RecordUnexpectedError "Test_Diagnostics_Properties"
+    'Continue through centralized cleanup
+        Resume CleanExit
 
-    Resume CleanExit
 End Sub
 
 Private Sub Test_Pause_Method1()
@@ -2940,54 +3086,58 @@ Private Sub Test_Pause_Method1()
 '
 ' WHY THIS EXISTS
 '   Pause method 1 is the lowest-overhead pause path and should produce a delay
-'   that is reasonably close to the requested duration
+'   reasonably close to the requested duration
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
 '
 ' UPDATED
-'   2026-04-15
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim cPM         As cPerformanceManager    'Class under test
-    Dim ElapsedS    As Double                 'Measured elapsed seconds
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim ElapsedS            As Double                 'Measured elapsed seconds
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Start the regression case
         Case_Begin "Pause method 1 (Sleep)"
-
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
     'Create a fresh class instance
         Set cPM = New cPerformanceManager
 
-    'Enable case-level unexpected-error handling
-        On Error GoTo CleanFail
-
 '------------------------------------------------------------------------------
-' ASSERT
+' ASSERT PAUSE METHOD 1
 '------------------------------------------------------------------------------
     'Start QPC timing
         cPM.StartTimer 5, False
-
     'Pause for 1 second using method 1
         cPM.Pause 1, 1
-
     'Measure elapsed time using QPC
         ElapsedS = cPM.ElapsedSeconds(5)
-
     'Assert that the measured pause lies within a practical tolerance band
-        AssertInRangeDouble 0.8, 1.25, ElapsedS, "Pause method 1 elapsed range"
+        Test_Assert_InRangeDouble 0.8, 1.25, ElapsedS, _
+                                  "Pause method 1 elapsed range"
 
 CleanExit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Release any environment changes held by the instance
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
         If Not cPM Is Nothing Then
             cPM.ResetEnvironment
             Set cPM = Nothing
         End If
+        On Error GoTo 0
 
     'Finalize the current case
         Case_Finalize
@@ -3000,8 +3150,9 @@ CleanFail:
 '------------------------------------------------------------------------------
     'Record the unexpected case-level error
         RecordUnexpectedError "Test_Pause_Method1"
+    'Continue through centralized cleanup
+        Resume CleanExit
 
-    Resume CleanExit
 End Sub
 
 Private Sub Test_Pause_Method2()
@@ -3016,52 +3167,56 @@ Private Sub Test_Pause_Method2()
 '   Pause method 2 is a yielding pause path and should still respect the
 '   requested duration within a practical tolerance
 '
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
 ' UPDATED
-'   2026-04-15
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim cPM         As cPerformanceManager    'Class under test
-    Dim ElapsedS    As Double                 'Measured elapsed seconds
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim ElapsedS            As Double                 'Measured elapsed seconds
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Start the regression case
         Case_Begin "Pause method 2 (Timer + DoEvents)"
-
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
     'Create a fresh class instance
         Set cPM = New cPerformanceManager
 
-    'Enable case-level unexpected-error handling
-        On Error GoTo CleanFail
-
 '------------------------------------------------------------------------------
-' ASSERT
+' ASSERT PAUSE METHOD 2
 '------------------------------------------------------------------------------
     'Start QPC timing
         cPM.StartTimer 5, False
-
     'Pause for 1 second using method 2
         cPM.Pause 1, 2
-
     'Measure elapsed time using QPC
         ElapsedS = cPM.ElapsedSeconds(5)
-
     'Assert that the measured pause lies within a practical tolerance band
-        AssertInRangeDouble 0.8, 1.25, ElapsedS, "Pause method 2 elapsed range"
+        Test_Assert_InRangeDouble 0.8, 1.25, ElapsedS, _
+                                  "Pause method 2 elapsed range"
 
 CleanExit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Release any environment changes held by the instance
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
         If Not cPM Is Nothing Then
             cPM.ResetEnvironment
             Set cPM = Nothing
         End If
+        On Error GoTo 0
 
     'Finalize the current case
         Case_Finalize
@@ -3074,8 +3229,9 @@ CleanFail:
 '------------------------------------------------------------------------------
     'Record the unexpected case-level error
         RecordUnexpectedError "Test_Pause_Method2"
+    'Continue through centralized cleanup
+        Resume CleanExit
 
-    Resume CleanExit
 End Sub
 
 Private Sub Test_Pause_Method3()
@@ -3091,52 +3247,56 @@ Private Sub Test_Pause_Method3()
 '   fine-grained pause, but it should still produce a reasonable whole-second
 '   delay
 '
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
 ' UPDATED
-'   2026-04-15
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim cPM         As cPerformanceManager    'Class under test
-    Dim ElapsedS    As Double                 'Measured elapsed seconds
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim ElapsedS            As Double                 'Measured elapsed seconds
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Start the regression case
         Case_Begin "Pause method 3 (Application.Wait)"
-
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
     'Create a fresh class instance
         Set cPM = New cPerformanceManager
 
-    'Enable case-level unexpected-error handling
-        On Error GoTo CleanFail
-
 '------------------------------------------------------------------------------
-' ASSERT
+' ASSERT PAUSE METHOD 3
 '------------------------------------------------------------------------------
     'Start QPC timing
         cPM.StartTimer 5, True
-
     'Pause for 1 second using method 3
         cPM.Pause 1, 3
-
     'Measure elapsed time using QPC
         ElapsedS = cPM.ElapsedSeconds(5)
-
     'Assert that the measured pause lies within a broad practical range
-        AssertInRangeDouble 0.8, 1.5, ElapsedS, "Pause method 3 elapsed range"
+        Test_Assert_InRangeDouble 0.8, 1.5, ElapsedS, _
+                                  "Pause method 3 elapsed range"
 
 CleanExit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Release any environment changes held by the instance
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
         If Not cPM Is Nothing Then
             cPM.ResetEnvironment
             Set cPM = Nothing
         End If
+        On Error GoTo 0
 
     'Finalize the current case
         Case_Finalize
@@ -3149,8 +3309,9 @@ CleanFail:
 '------------------------------------------------------------------------------
     'Record the unexpected case-level error
         RecordUnexpectedError "Test_Pause_Method3"
+    'Continue through centralized cleanup
+        Resume CleanExit
 
-    Resume CleanExit
 End Sub
 
 Private Sub Test_Pause_Method4()
@@ -3162,55 +3323,60 @@ Private Sub Test_Pause_Method4()
 '   Validates Pause method 4 (Now + DoEvents loop) using QPC timing
 '
 ' WHY THIS EXISTS
-'   The Date/Now loop path is coarser and higher-overhead than Sleep or QPC, but
-'   it should still approximate the requested delay within a practical range
+'   The Date/Now loop path is coarser and higher-overhead than Sleep or QPC,
+'   but it should still approximate the requested delay within a practical
+'   range
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
 '
 ' UPDATED
-'   2026-04-15
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim cPM         As cPerformanceManager    'Class under test
-    Dim ElapsedS    As Double                 'Measured elapsed seconds
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim ElapsedS            As Double                 'Measured elapsed seconds
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Start the regression case
         Case_Begin "Pause method 4 (Now + DoEvents)"
-
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
     'Create a fresh class instance
         Set cPM = New cPerformanceManager
 
-    'Enable case-level unexpected-error handling
-        On Error GoTo CleanFail
-
 '------------------------------------------------------------------------------
-' ASSERT
+' ASSERT PAUSE METHOD 4
 '------------------------------------------------------------------------------
     'Start QPC timing
         cPM.StartTimer 5, True
-
     'Pause for 1 second using method 4
         cPM.Pause 1, 4
-
     'Measure elapsed time using QPC
         ElapsedS = cPM.ElapsedSeconds(5)
-
     'Assert that the measured pause lies within a broad practical range
-        AssertInRangeDouble 0.8, 1.5, ElapsedS, "Pause method 4 elapsed range"
+        Test_Assert_InRangeDouble 0.8, 1.5, ElapsedS, _
+                                  "Pause method 4 elapsed range"
 
 CleanExit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Release any environment changes held by the instance
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
         If Not cPM Is Nothing Then
             cPM.ResetEnvironment
             Set cPM = Nothing
         End If
+        On Error GoTo 0
 
     'Finalize the current case
         Case_Finalize
@@ -3223,8 +3389,9 @@ CleanFail:
 '------------------------------------------------------------------------------
     'Record the unexpected case-level error
         RecordUnexpectedError "Test_Pause_Method4"
+    'Continue through centralized cleanup
+        Resume CleanExit
 
-    Resume CleanExit
 End Sub
 
 Private Sub Test_TW_BlankKeyValidation()
@@ -3236,12 +3403,17 @@ Private Sub Test_TW_BlankKeyValidation()
 '   Validates blank-key behavior in the shared TW manager
 '
 ' WHY THIS EXISTS
-'   The strengthened TW manager now rejects blank instance keys. This should
-'   remain enforced because blank keys would otherwise create collisions or
-'   ambiguous shared-session bookkeeping
+'   Blank keys must remain rejected because they would otherwise create
+'   collisions or ambiguous shared-session bookkeeping
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
 '
 ' UPDATED
-'   2026-04-15
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -3249,58 +3421,58 @@ Private Sub Test_TW_BlankKeyValidation()
 '------------------------------------------------------------------------------
     'Start the regression case
         Case_Begin "TW manager blank-key validation"
-
     'Enable case-level unexpected-error handling
         On Error GoTo CleanFail
 
 '------------------------------------------------------------------------------
-' ASSERT BEGINSESSION
+' ASSERT BLANK-KEY BEGINSESSION
 '------------------------------------------------------------------------------
     'Switch to local expected-error handling
         On Error Resume Next
-
     'Attempt an invalid blank-key begin
         PM_TW_BeginSession ""
-
     'Assert that blank-key begin raises
-        AssertTrue (Err.Number <> 0), "PM_TW_BeginSession raises on blank key"
-
+        Test_Assert_True (Err.Number <> 0), _
+                         "PM_TW_BeginSession raises on blank key"
     'Clear the expected error state
         Err.Clear
 
 '------------------------------------------------------------------------------
-' ASSERT ENDSESSION
+' ASSERT BLANK-KEY ENDSESSION
 '------------------------------------------------------------------------------
     'Attempt an invalid blank-key end
         PM_TW_EndSession ""
-
     'Assert that blank-key end raises
-        AssertTrue (Err.Number <> 0), "PM_TW_EndSession raises on blank key"
-
+        Test_Assert_True (Err.Number <> 0), _
+                         "PM_TW_EndSession raises on blank key"
     'Clear the expected error state
         Err.Clear
 
 '------------------------------------------------------------------------------
-' ASSERT ISINSTANCEACTIVE
+' ASSERT BLANK-KEY ISINSTANCEACTIVE
 '------------------------------------------------------------------------------
     'Attempt an invalid blank-key activity query
         Call PM_TW_IsInstanceActive("")
-
     'Assert that blank-key activity query raises
-        AssertTrue (Err.Number <> 0), "PM_TW_IsInstanceActive raises on blank key"
-
+        Test_Assert_True (Err.Number <> 0), _
+                         "PM_TW_IsInstanceActive raises on blank key"
     'Clear the expected error state
         Err.Clear
 
-    'Restore normal error handling
+'------------------------------------------------------------------------------
+' RESTORE NORMAL ERROR HANDLING
+'------------------------------------------------------------------------------
+    'Restore normal error handling for the remainder of the case
         On Error GoTo CleanFail
 
 CleanExit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Force the shared TW manager to a clean baseline
+    'Force the shared TW manager to a clean baseline on a best-effort basis
+        On Error Resume Next
         PM_TW_EndAllSessions
+        On Error GoTo 0
 
     'Finalize the current case
         Case_Finalize
@@ -3313,8 +3485,9 @@ CleanFail:
 '------------------------------------------------------------------------------
     'Record the unexpected case-level error
         RecordUnexpectedError "Test_TW_BlankKeyValidation"
+    'Continue through centralized cleanup
+        Resume CleanExit
 
-    Resume CleanExit
 End Sub
 
 Private Sub Test_TW_SingleInstance()
@@ -3329,37 +3502,42 @@ Private Sub Test_TW_SingleInstance()
 '   The class publicly exposes TW lifecycle control, and the simplest shared
 '   manager behavior must work correctly before overlapping cases are tested
 '
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
 ' UPDATED
-'   2026-03-30
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim cPM         As cPerformanceManager    'Class under test
-    Dim Baseline    As T_AppState             'Captured Application baseline
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim Baseline            As T_AppState             'Captured Application baseline
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Start the regression case
         Case_Begin "TW single-instance lifecycle"
-
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
     'Create a fresh class instance
         Set cPM = New cPerformanceManager
-
     'Capture the current Application baseline
         CaptureAppState Baseline
 
-    'Enable case-level unexpected-error handling
-        On Error GoTo CleanFail
-
 '------------------------------------------------------------------------------
-' ASSERT (PRECONDITIONS)
+' ASSERT PRECONDITIONS
 '------------------------------------------------------------------------------
     'Assert that the instance starts inactive with zero shared TW sessions
-        AssertEqualBoolean False, cPM.TW_IsActive, "TW_IsActive before TW_Turn_OFF"
-        AssertEqualLong 0, cPM.TW_ActiveSessionCount, "TW_ActiveSessionCount before TW_Turn_OFF"
+        Test_Assert_EqualBoolean False, cPM.TW_IsActive, _
+                                 "TW_IsActive before TW_Turn_OFF"
+        Test_Assert_EqualLong 0, cPM.TW_ActiveSessionCount, _
+                              "TW_ActiveSessionCount before TW_Turn_OFF"
 
 '------------------------------------------------------------------------------
 ' ACTIVATE TW SUPPRESSION
@@ -3368,20 +3546,30 @@ Private Sub Test_TW_SingleInstance()
         cPM.TW_Turn_OFF TW_Enum.None
 
 '------------------------------------------------------------------------------
-' ASSERT (ACTIVE STATE)
+' ASSERT ACTIVE STATE
 '------------------------------------------------------------------------------
     'Assert that the instance is now active
-        AssertEqualBoolean True, cPM.TW_IsActive, "TW_IsActive after TW_Turn_OFF"
+        Test_Assert_EqualBoolean True, cPM.TW_IsActive, _
+                                 "TW_IsActive after TW_Turn_OFF"
 
     'Assert that exactly one shared TW session is active
-        AssertEqualLong 1, cPM.TW_ActiveSessionCount, "TW_ActiveSessionCount after TW_Turn_OFF"
+        Test_Assert_EqualLong 1, cPM.TW_ActiveSessionCount, _
+                              "TW_ActiveSessionCount after TW_Turn_OFF"
 
+'------------------------------------------------------------------------------
+' ASSERT FORCED APPLICATION STATE
+'------------------------------------------------------------------------------
     'Assert forced benchmark/performance-state values
-        AssertEqualBoolean False, Application.ScreenUpdating, "ScreenUpdating forced OFF"
-        AssertEqualBoolean False, Application.EnableEvents, "EnableEvents forced OFF"
-        AssertEqualBoolean False, Application.DisplayAlerts, "DisplayAlerts forced OFF"
-        AssertEqualLong xlCalculationManual, Application.Calculation, "Calculation forced MANUAL"
-        AssertEqualLong xlWait, Application.Cursor, "Cursor forced WAIT"
+        Test_Assert_EqualBoolean False, Application.ScreenUpdating, _
+                                 "ScreenUpdating forced OFF"
+        Test_Assert_EqualBoolean False, Application.EnableEvents, _
+                                 "EnableEvents forced OFF"
+        Test_Assert_EqualBoolean False, Application.DisplayAlerts, _
+                                 "DisplayAlerts forced OFF"
+        Test_Assert_EqualLong xlCalculationManual, Application.Calculation, _
+                              "Calculation forced MANUAL"
+        Test_Assert_EqualLong xlWait, Application.Cursor, _
+                              "Cursor forced WAIT"
 
 '------------------------------------------------------------------------------
 ' DEACTIVATE TW SUPPRESSION
@@ -3390,26 +3578,37 @@ Private Sub Test_TW_SingleInstance()
         cPM.TW_Turn_ON
 
 '------------------------------------------------------------------------------
-' ASSERT (RESTORED STATE)
+' ASSERT RESTORED STATE
 '------------------------------------------------------------------------------
     'Assert that the instance is now inactive
-        AssertEqualBoolean False, cPM.TW_IsActive, "TW_IsActive after TW_Turn_ON"
+        Test_Assert_EqualBoolean False, cPM.TW_IsActive, _
+                                 "TW_IsActive after TW_Turn_ON"
 
     'Assert that the shared TW manager is idle again
-        AssertEqualLong 0, cPM.TW_ActiveSessionCount, "TW_ActiveSessionCount after TW_Turn_ON"
+        Test_Assert_EqualLong 0, cPM.TW_ActiveSessionCount, _
+                              "TW_ActiveSessionCount after TW_Turn_ON"
 
+'------------------------------------------------------------------------------
+' ASSERT BASELINE RESTORATION
+'------------------------------------------------------------------------------
     'Assert baseline restoration
-        AssertEqualBoolean Baseline.ScreenUpdating, Application.ScreenUpdating, "ScreenUpdating restored"
-        AssertEqualBoolean Baseline.EnableEvents, Application.EnableEvents, "EnableEvents restored"
-        AssertEqualBoolean Baseline.DisplayAlerts, Application.DisplayAlerts, "DisplayAlerts restored"
-        AssertEqualLong Baseline.Calculation, Application.Calculation, "Calculation restored"
-        AssertEqualLong Baseline.Cursor, Application.Cursor, "Cursor restored"
+        Test_Assert_EqualBoolean Baseline.ScreenUpdating, Application.ScreenUpdating, _
+                                 "ScreenUpdating restored"
+        Test_Assert_EqualBoolean Baseline.EnableEvents, Application.EnableEvents, _
+                                 "EnableEvents restored"
+        Test_Assert_EqualBoolean Baseline.DisplayAlerts, Application.DisplayAlerts, _
+                                 "DisplayAlerts restored"
+        Test_Assert_EqualLong Baseline.Calculation, Application.Calculation, _
+                              "Calculation restored"
+        Test_Assert_EqualLong Baseline.Cursor, Application.Cursor, _
+                              "Cursor restored"
 
 CleanExit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Release any environment changes held by the instance
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
         If Not cPM Is Nothing Then
             cPM.ResetEnvironment
             Set cPM = Nothing
@@ -3417,6 +3616,7 @@ CleanExit:
 
     'Force the shared TW manager to a clean baseline
         PM_TW_EndAllSessions
+        On Error GoTo 0
 
     'Finalize the current case
         Case_Finalize
@@ -3429,8 +3629,9 @@ CleanFail:
 '------------------------------------------------------------------------------
     'Record the unexpected case-level error
         RecordUnexpectedError "Test_TW_SingleInstance"
+    'Continue through centralized cleanup
+        Resume CleanExit
 
-    Resume CleanExit
 End Sub
 
 Private Sub Test_TW_OverlappingInstances()
@@ -3446,32 +3647,35 @@ Private Sub Test_TW_OverlappingInstances()
 '   instances must be coordinated safely. This is one of the most important
 '   architectural regression surfaces in the project
 '
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
 ' UPDATED
-'   2026-03-30
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim cPM1        As cPerformanceManager    'First class instance
-    Dim cPM2        As cPerformanceManager    'Second class instance
-    Dim Baseline    As T_AppState             'Captured Application baseline
+    Dim cPM1                As cPerformanceManager    'First class instance
+    Dim cPM2                As cPerformanceManager    'Second class instance
+    Dim Baseline            As T_AppState             'Captured Application baseline
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Start the regression case
         Case_Begin "TW overlapping multi-instance lifecycle"
-
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
     'Create both class instances
         Set cPM1 = New cPerformanceManager
         Set cPM2 = New cPerformanceManager
-
     'Capture the current Application baseline
         CaptureAppState Baseline
-
-    'Enable case-level unexpected-error handling
-        On Error GoTo CleanFail
 
 '------------------------------------------------------------------------------
 ' ACTIVATE INSTANCE 1
@@ -3479,8 +3683,12 @@ Private Sub Test_TW_OverlappingInstances()
     'Begin TW suppression on the first instance with no exemptions
         cPM1.TW_Turn_OFF TW_Enum.None
 
+'------------------------------------------------------------------------------
+' ASSERT STATE AFTER INSTANCE 1 BEGINS
+'------------------------------------------------------------------------------
     'Assert the shared active-session count after instance 1 begins
-        AssertEqualLong 1, cPM1.TW_ActiveSessionCount, "Shared TW count after instance 1 begins"
+        Test_Assert_EqualLong 1, cPM1.TW_ActiveSessionCount, _
+                              "Shared TW count after instance 1 begins"
 
 '------------------------------------------------------------------------------
 ' ACTIVATE INSTANCE 2
@@ -3488,17 +3696,26 @@ Private Sub Test_TW_OverlappingInstances()
     'Begin TW suppression on the second instance while exempting ScreenUpdating
         cPM2.TW_Turn_OFF TW_Enum.ScreenUpdating
 
+'------------------------------------------------------------------------------
+' ASSERT OVERLAPPING ACTIVE STATE
+'------------------------------------------------------------------------------
     'Assert the shared active-session count after instance 2 begins
-        AssertEqualLong 2, cPM2.TW_ActiveSessionCount, "Shared TW count after instance 2 begins"
+        Test_Assert_EqualLong 2, cPM2.TW_ActiveSessionCount, _
+                              "Shared TW count after instance 2 begins"
 
     'Assert that ScreenUpdating is still forced OFF because instance 1 still requires it
-        AssertEqualBoolean False, Application.ScreenUpdating, "ScreenUpdating remains forced OFF with overlapping sessions"
+        Test_Assert_EqualBoolean False, Application.ScreenUpdating, _
+                                 "ScreenUpdating remains forced OFF with overlapping sessions"
 
     'Assert that the remaining shared flags are still forced OFF / MANUAL / WAIT
-        AssertEqualBoolean False, Application.EnableEvents, "EnableEvents remains forced OFF with overlapping sessions"
-        AssertEqualBoolean False, Application.DisplayAlerts, "DisplayAlerts remains forced OFF with overlapping sessions"
-        AssertEqualLong xlCalculationManual, Application.Calculation, "Calculation remains MANUAL with overlapping sessions"
-        AssertEqualLong xlWait, Application.Cursor, "Cursor remains WAIT with overlapping sessions"
+        Test_Assert_EqualBoolean False, Application.EnableEvents, _
+                                 "EnableEvents remains forced OFF with overlapping sessions"
+        Test_Assert_EqualBoolean False, Application.DisplayAlerts, _
+                                 "DisplayAlerts remains forced OFF with overlapping sessions"
+        Test_Assert_EqualLong xlCalculationManual, Application.Calculation, _
+                              "Calculation remains MANUAL with overlapping sessions"
+        Test_Assert_EqualLong xlWait, Application.Cursor, _
+                              "Cursor remains WAIT with overlapping sessions"
 
 '------------------------------------------------------------------------------
 ' END INSTANCE 1
@@ -3506,23 +3723,33 @@ Private Sub Test_TW_OverlappingInstances()
     'End the first instance's TW participation
         cPM1.TW_Turn_ON
 
+'------------------------------------------------------------------------------
+' ASSERT STATE AFTER INSTANCE 1 ENDS
+'------------------------------------------------------------------------------
     'Assert the shared active-session count after instance 1 ends
-        AssertEqualLong 1, cPM2.TW_ActiveSessionCount, "Shared TW count after instance 1 ends"
+        Test_Assert_EqualLong 1, cPM2.TW_ActiveSessionCount, _
+                              "Shared TW count after instance 1 ends"
 
     'Assert instance-local activity state after instance 1 ends
-        AssertEqualBoolean False, cPM1.TW_IsActive, "Instance 1 inactive after TW_Turn_ON"
-        AssertEqualBoolean True, cPM2.TW_IsActive, "Instance 2 still active after instance 1 ends"
+        Test_Assert_EqualBoolean False, cPM1.TW_IsActive, _
+                                 "Instance 1 inactive after TW_Turn_ON"
+        Test_Assert_EqualBoolean True, cPM2.TW_IsActive, _
+                                 "Instance 2 still active after instance 1 ends"
 
     'Assert that ScreenUpdating now returns to baseline because the remaining
     'instance exempts that flag
-        AssertEqualBoolean Baseline.ScreenUpdating, Application.ScreenUpdating, _
-                           "ScreenUpdating restored to baseline when only instance 2 remains"
+        Test_Assert_EqualBoolean Baseline.ScreenUpdating, Application.ScreenUpdating, _
+                                 "ScreenUpdating restored to baseline when only instance 2 remains"
 
     'Assert that the remaining flags are still forced by the second instance
-        AssertEqualBoolean False, Application.EnableEvents, "EnableEvents still forced OFF by instance 2"
-        AssertEqualBoolean False, Application.DisplayAlerts, "DisplayAlerts still forced OFF by instance 2"
-        AssertEqualLong xlCalculationManual, Application.Calculation, "Calculation still MANUAL by instance 2"
-        AssertEqualLong xlWait, Application.Cursor, "Cursor still WAIT by instance 2"
+        Test_Assert_EqualBoolean False, Application.EnableEvents, _
+                                 "EnableEvents still forced OFF by instance 2"
+        Test_Assert_EqualBoolean False, Application.DisplayAlerts, _
+                                 "DisplayAlerts still forced OFF by instance 2"
+        Test_Assert_EqualLong xlCalculationManual, Application.Calculation, _
+                              "Calculation still MANUAL by instance 2"
+        Test_Assert_EqualLong xlWait, Application.Cursor, _
+                              "Cursor still WAIT by instance 2"
 
 '------------------------------------------------------------------------------
 ' END INSTANCE 2
@@ -3530,27 +3757,37 @@ Private Sub Test_TW_OverlappingInstances()
     'End the second instance's TW participation
         cPM2.TW_Turn_ON
 
+'------------------------------------------------------------------------------
+' ASSERT FINAL RESTORED STATE
+'------------------------------------------------------------------------------
     'Assert the shared manager is now idle
-        AssertEqualLong 0, cPM2.TW_ActiveSessionCount, "Shared TW count after instance 2 ends"
+        Test_Assert_EqualLong 0, cPM2.TW_ActiveSessionCount, _
+                              "Shared TW count after instance 2 ends"
 
     'Assert full baseline restoration
-        AssertEqualBoolean Baseline.ScreenUpdating, Application.ScreenUpdating, "ScreenUpdating restored after final TW session ends"
-        AssertEqualBoolean Baseline.EnableEvents, Application.EnableEvents, "EnableEvents restored after final TW session ends"
-        AssertEqualBoolean Baseline.DisplayAlerts, Application.DisplayAlerts, "DisplayAlerts restored after final TW session ends"
-        AssertEqualLong Baseline.Calculation, Application.Calculation, "Calculation restored after final TW session ends"
-        AssertEqualLong Baseline.Cursor, Application.Cursor, "Cursor restored after final TW session ends"
+        Test_Assert_EqualBoolean Baseline.ScreenUpdating, Application.ScreenUpdating, _
+                                 "ScreenUpdating restored after final TW session ends"
+        Test_Assert_EqualBoolean Baseline.EnableEvents, Application.EnableEvents, _
+                                 "EnableEvents restored after final TW session ends"
+        Test_Assert_EqualBoolean Baseline.DisplayAlerts, Application.DisplayAlerts, _
+                                 "DisplayAlerts restored after final TW session ends"
+        Test_Assert_EqualLong Baseline.Calculation, Application.Calculation, _
+                              "Calculation restored after final TW session ends"
+        Test_Assert_EqualLong Baseline.Cursor, Application.Cursor, _
+                              "Cursor restored after final TW session ends"
 
 CleanExit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Release any environment changes held by the first instance
+    'Release any environment changes held by the first instance on a best-effort basis
+        On Error Resume Next
         If Not cPM1 Is Nothing Then
             cPM1.ResetEnvironment
             Set cPM1 = Nothing
         End If
 
-    'Release any environment changes held by the second instance
+    'Release any environment changes held by the second instance on a best-effort basis
         If Not cPM2 Is Nothing Then
             cPM2.ResetEnvironment
             Set cPM2 = Nothing
@@ -3558,6 +3795,7 @@ CleanExit:
 
     'Force the shared TW manager to a clean baseline
         PM_TW_EndAllSessions
+        On Error GoTo 0
 
     'Finalize the current case
         Case_Finalize
@@ -3570,8 +3808,9 @@ CleanFail:
 '------------------------------------------------------------------------------
     'Record the unexpected case-level error
         RecordUnexpectedError "Test_TW_OverlappingInstances"
+    'Continue through centralized cleanup
+        Resume CleanExit
 
-    Resume CleanExit
 End Sub
 
 Private Sub Test_ResetEnvironment_Idempotent()
@@ -3588,72 +3827,85 @@ Private Sub Test_ResetEnvironment_Idempotent()
 '   idempotence is important for defensive calling patterns and error-handling
 '   cleanup paths
 '
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
 ' UPDATED
-'   2026-03-30
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim cPM         As cPerformanceManager    'Class under test
-    Dim Baseline    As T_AppState             'Captured Application baseline
-    Dim Dummy       As Double                 'Throwaway elapsed-time holder
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim Baseline            As T_AppState             'Captured Application baseline
+    Dim Dummy               As Double                 'Throwaway elapsed-time holder
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Start the regression case
         Case_Begin "ResetEnvironment idempotence"
-
-    'Create a fresh class instance
-        Set cPM = New cPerformanceManager
-
-    'Capture the current Application baseline
-        CaptureAppState Baseline
-
     'Enable case-level unexpected-error handling
         On Error GoTo CleanFail
+    'Create a fresh class instance
+        Set cPM = New cPerformanceManager
+    'Capture the current Application baseline
+        CaptureAppState Baseline
 
 '------------------------------------------------------------------------------
 ' EXERCISE CLEANUP SURFACES
 '------------------------------------------------------------------------------
     'Activate TW suppression for the instance
         cPM.TW_Turn_OFF TW_Enum.None
-
     'Start method 3 so that timer-resolution activation may occur
         cPM.StartTimer 3, False
-
     'Perform a short pause and read elapsed time to exercise the method 3 path
         cPM.Pause 0.03, 1
         Dummy = cPM.ElapsedSeconds(3)
 
 '------------------------------------------------------------------------------
-' ASSERT
+' APPLY EXPLICIT CLEANUP TWICE
 '------------------------------------------------------------------------------
     'Call the explicit cleanup routine for the first time
         cPM.ResetEnvironment
-
     'Call the explicit cleanup routine a second time to validate idempotence
         cPM.ResetEnvironment
 
+'------------------------------------------------------------------------------
+' ASSERT INSTANCE / SHARED STATE
+'------------------------------------------------------------------------------
     'Assert that the instance is no longer active in TW
-        AssertEqualBoolean False, cPM.TW_IsActive, "TW_IsActive is False after repeated ResetEnvironment"
-
+        Test_Assert_EqualBoolean False, cPM.TW_IsActive, _
+                                 "TW_IsActive is False after repeated ResetEnvironment"
     'Assert that the shared TW manager is idle
-        AssertEqualLong 0, cPM.TW_ActiveSessionCount, "TW_ActiveSessionCount is 0 after repeated ResetEnvironment"
+        Test_Assert_EqualLong 0, cPM.TW_ActiveSessionCount, _
+                              "TW_ActiveSessionCount is 0 after repeated ResetEnvironment"
 
+'------------------------------------------------------------------------------
+' ASSERT APPLICATION BASELINE RESTORATION
+'------------------------------------------------------------------------------
     'Assert Application baseline restoration
-        AssertEqualBoolean Baseline.ScreenUpdating, Application.ScreenUpdating, "ScreenUpdating restored after repeated ResetEnvironment"
-        AssertEqualBoolean Baseline.EnableEvents, Application.EnableEvents, "EnableEvents restored after repeated ResetEnvironment"
-        AssertEqualBoolean Baseline.DisplayAlerts, Application.DisplayAlerts, "DisplayAlerts restored after repeated ResetEnvironment"
-        AssertEqualLong Baseline.Calculation, Application.Calculation, "Calculation restored after repeated ResetEnvironment"
-        AssertEqualLong Baseline.Cursor, Application.Cursor, "Cursor restored after repeated ResetEnvironment"
+        Test_Assert_EqualBoolean Baseline.ScreenUpdating, Application.ScreenUpdating, _
+                                 "ScreenUpdating restored after repeated ResetEnvironment"
+        Test_Assert_EqualBoolean Baseline.EnableEvents, Application.EnableEvents, _
+                                 "EnableEvents restored after repeated ResetEnvironment"
+        Test_Assert_EqualBoolean Baseline.DisplayAlerts, Application.DisplayAlerts, _
+                                 "DisplayAlerts restored after repeated ResetEnvironment"
+        Test_Assert_EqualLong Baseline.Calculation, Application.Calculation, _
+                              "Calculation restored after repeated ResetEnvironment"
+        Test_Assert_EqualLong Baseline.Cursor, Application.Cursor, _
+                              "Cursor restored after repeated ResetEnvironment"
 
 CleanExit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Release any remaining environment changes held by the instance
+    'Release any remaining environment changes held by the instance on a best-effort basis
+        On Error Resume Next
         If Not cPM Is Nothing Then
             cPM.ResetEnvironment
             Set cPM = Nothing
@@ -3661,6 +3913,7 @@ CleanExit:
 
     'Force the shared TW manager to a clean baseline
         PM_TW_EndAllSessions
+        On Error GoTo 0
 
     'Finalize the current case
         Case_Finalize
@@ -3673,8 +3926,1000 @@ CleanFail:
 '------------------------------------------------------------------------------
     'Record the unexpected case-level error
         RecordUnexpectedError "Test_ResetEnvironment_Idempotent"
+    'Continue through centralized cleanup
+        Resume CleanExit
 
-    Resume CleanExit
 End Sub
 
+Private Sub Test_Checkpoint_BeforeStart()
+'
+'==============================================================================
+'                        TEST CHECKPOINT BEFORE START
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Validates that Checkpoint raises before StartTimer
+'
+' WHY THIS EXISTS
+'   Checkpoint capture is valid only within an active timing session
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim cPM                 As cPerformanceManager    'Class under test
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Start the regression case
+        Case_Begin "Checkpoint before StartTimer"
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
+    'Create a fresh class instance
+        Set cPM = New cPerformanceManager
+
+'------------------------------------------------------------------------------
+' ASSERT CHECKPOINT REJECTION
+'------------------------------------------------------------------------------
+    'Switch to local expected-error handling
+        On Error Resume Next
+
+    'Attempt checkpoint capture before a timing session exists
+        cPM.Checkpoint "Phase 1"
+
+    'Assert that an error was raised
+        Test_Assert_True (Err.Number <> 0), _
+                         "Checkpoint raises before StartTimer"
+
+    'Assert that the error text mentions StartTimer
+        Test_Assert_ContainsString Err.Description, "StartTimer", _
+                                   "Checkpoint-before-start error text mentions StartTimer"
+
+    'Clear the expected error state
+        Err.Clear
+
+    'Restore normal error handling for the remainder of the case
+        On Error GoTo CleanFail
+
+CleanExit:
+'------------------------------------------------------------------------------
+' CLEANUP
+'------------------------------------------------------------------------------
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
+        If Not cPM Is Nothing Then
+            cPM.ResetEnvironment
+            Set cPM = Nothing
+        End If
+        On Error GoTo 0
+
+    'Finalize the current case
+        Case_Finalize
+
+    Exit Sub
+
+CleanFail:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+    'Record the unexpected case-level error
+        RecordUnexpectedError "Test_Checkpoint_BeforeStart"
+    'Continue through centralized cleanup
+        Resume CleanExit
+
+End Sub
+
+
+Private Sub Test_SetRunLabel_BeforeFirstCheckpoint()
+'
+'==============================================================================
+'                 TEST SETRUNLABEL BEFORE FIRST CHECKPOINT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Validates SetRunLabel behavior before the first checkpoint
+'
+' WHY THIS EXISTS
+'   Run labels are intended to tag structured checkpoint output for the current
+'   timing session
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim Arr                 As Variant                'Structured report export
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Start the regression case
+        Case_Begin "SetRunLabel before first checkpoint"
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
+    'Create a fresh class instance
+        Set cPM = New cPerformanceManager
+
+'------------------------------------------------------------------------------
+' PREPARE SESSION
+'------------------------------------------------------------------------------
+    'Start a fresh timing session
+        cPM.StartTimer 5, False
+
+'------------------------------------------------------------------------------
+' APPLY RUN LABEL
+'------------------------------------------------------------------------------
+    'Assign the run label before any checkpoint is captured
+        cPM.SetRunLabel "Run A"
+
+'------------------------------------------------------------------------------
+' ASSERT RUN-LABEL STATE
+'------------------------------------------------------------------------------
+    'Assert that the current run label was stored
+        Test_Assert_EqualString "Run A", cPM.RunLabel, _
+                                "RunLabel stored before first checkpoint"
+
+'------------------------------------------------------------------------------
+' CAPTURE ONE CHECKPOINT
+'------------------------------------------------------------------------------
+    'Perform a short pause
+        cPM.Pause 0.02, 1
+    'Capture one named checkpoint
+        cPM.Checkpoint "Phase 1"
+
+'------------------------------------------------------------------------------
+' ASSERT EXPORTED RUN LABEL
+'------------------------------------------------------------------------------
+    'Export the structured checkpoint report
+        Arr = cPM.ReportAsArray
+
+    'Assert one captured checkpoint
+        Test_Assert_EqualLong 1, cPM.CheckpointCount, _
+                              "CheckpointCount after first labeled checkpoint"
+
+    'Assert that the exported run label matches the assigned label
+        Test_Assert_EqualString "Run A", CStr(Arr(2, 1)), _
+                                "ReportAsArray exports the assigned run label"
+
+CleanExit:
+'------------------------------------------------------------------------------
+' CLEANUP
+'------------------------------------------------------------------------------
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
+        If Not cPM Is Nothing Then
+            cPM.ResetEnvironment
+            Set cPM = Nothing
+        End If
+        On Error GoTo 0
+
+    'Finalize the current case
+        Case_Finalize
+
+    Exit Sub
+
+CleanFail:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+    'Record the unexpected case-level error
+        RecordUnexpectedError "Test_SetRunLabel_BeforeFirstCheckpoint"
+    'Continue through centralized cleanup
+        Resume CleanExit
+
+End Sub
+
+
+Private Sub Test_SetRunLabel_AfterFirstCheckpoint()
+'
+'==============================================================================
+'                  TEST SETRUNLABEL AFTER FIRST CHECKPOINT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Validates that SetRunLabel raises after checkpoint capture has begun
+'
+' WHY THIS EXISTS
+'   The class contract requires the run label to be set before the first
+'   checkpoint of the current timing session
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim cPM                 As cPerformanceManager    'Class under test
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Start the regression case
+        Case_Begin "SetRunLabel after first checkpoint"
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
+    'Create a fresh class instance
+        Set cPM = New cPerformanceManager
+
+'------------------------------------------------------------------------------
+' PREPARE SESSION
+'------------------------------------------------------------------------------
+    'Start a fresh timing session
+        cPM.StartTimer 5, False
+    'Perform a short pause
+        cPM.Pause 0.02, 1
+    'Capture the first checkpoint
+        cPM.Checkpoint "Phase 1"
+
+'------------------------------------------------------------------------------
+' ASSERT RUN-LABEL REJECTION
+'------------------------------------------------------------------------------
+    'Switch to local expected-error handling
+        On Error Resume Next
+
+    'Attempt to assign a run label after checkpoint capture has begun
+        cPM.SetRunLabel "Late Label"
+
+    'Assert that an error was raised
+        Test_Assert_True (Err.Number <> 0), _
+                         "SetRunLabel raises after first checkpoint"
+
+    'Assert that the error text mentions the first checkpoint rule
+        Test_Assert_ContainsString Err.Description, "first checkpoint", _
+                                   "SetRunLabel-after-checkpoint error text is informative"
+
+    'Clear the expected error state
+        Err.Clear
+
+    'Restore normal error handling for the remainder of the case
+        On Error GoTo CleanFail
+
+CleanExit:
+'------------------------------------------------------------------------------
+' CLEANUP
+'------------------------------------------------------------------------------
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
+        If Not cPM Is Nothing Then
+            cPM.ResetEnvironment
+            Set cPM = Nothing
+        End If
+        On Error GoTo 0
+
+    'Finalize the current case
+        Case_Finalize
+
+    Exit Sub
+
+CleanFail:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+    'Record the unexpected case-level error
+        RecordUnexpectedError "Test_SetRunLabel_AfterFirstCheckpoint"
+    'Continue through centralized cleanup
+        Resume CleanExit
+
+End Sub
+
+
+Private Sub Test_Checkpoint_DefaultName_WhenBlank()
+'
+'==============================================================================
+'                 TEST CHECKPOINT DEFAULT NAME WHEN BLANK
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Validates automatic checkpoint naming when the supplied label is blank
+'
+' WHY THIS EXISTS
+'   Structured reports should remain readable even when the caller omits a
+'   checkpoint name
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim Arr                 As Variant                'Structured report export
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Start the regression case
+        Case_Begin "Checkpoint default name when blank"
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
+    'Create a fresh class instance
+        Set cPM = New cPerformanceManager
+
+'------------------------------------------------------------------------------
+' PREPARE SESSION
+'------------------------------------------------------------------------------
+    'Start a fresh timing session
+        cPM.StartTimer 5, False
+    'Perform a short pause
+        cPM.Pause 0.02, 1
+
+'------------------------------------------------------------------------------
+' CAPTURE BLANK-NAME CHECKPOINT
+'------------------------------------------------------------------------------
+    'Capture a checkpoint with a blank label
+        cPM.Checkpoint vbNullString
+
+'------------------------------------------------------------------------------
+' ASSERT GENERATED NAME
+'------------------------------------------------------------------------------
+    'Export the structured checkpoint report
+        Arr = cPM.ReportAsArray
+
+    'Assert one captured checkpoint
+        Test_Assert_EqualLong 1, cPM.CheckpointCount, _
+                              "CheckpointCount after blank-name checkpoint"
+
+    'Assert that the generated checkpoint name is used
+        Test_Assert_EqualString "Checkpoint 1", CStr(Arr(2, 3)), _
+                                "ReportAsArray uses the default generated checkpoint name"
+
+CleanExit:
+'------------------------------------------------------------------------------
+' CLEANUP
+'------------------------------------------------------------------------------
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
+        If Not cPM Is Nothing Then
+            cPM.ResetEnvironment
+            Set cPM = Nothing
+        End If
+        On Error GoTo 0
+
+    'Finalize the current case
+        Case_Finalize
+
+    Exit Sub
+
+CleanFail:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+    'Record the unexpected case-level error
+        RecordUnexpectedError "Test_Checkpoint_DefaultName_WhenBlank"
+    'Continue through centralized cleanup
+        Resume CleanExit
+
+End Sub
+
+
+Private Sub Test_CheckpointCount_And_ReportArray()
+'
+'==============================================================================
+'                  TEST CHECKPOINTCOUNT AND REPORTASARRAY
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Validates checkpoint count and structured array export
+'
+' WHY THIS EXISTS
+'   ReportAsArray is the main machine-readable reporting surface for structured
+'   checkpoints and should remain stable in shape and content
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim Arr                 As Variant                'Structured report export
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Start the regression case
+        Case_Begin "CheckpointCount and ReportAsArray"
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
+    'Create a fresh class instance
+        Set cPM = New cPerformanceManager
+
+'------------------------------------------------------------------------------
+' PREPARE SESSION
+'------------------------------------------------------------------------------
+    'Start a fresh timing session
+        cPM.StartTimer 5, False
+    'Assign a run label
+        cPM.SetRunLabel "Run A"
+
+'------------------------------------------------------------------------------
+' CAPTURE CHECKPOINTS
+'------------------------------------------------------------------------------
+    'Perform a short pause before the first checkpoint
+        cPM.Pause 0.02, 1
+    'Capture the first checkpoint
+        cPM.Checkpoint "Phase 1", "First phase"
+
+    'Perform a short pause before the second checkpoint
+        cPM.Pause 0.02, 1
+    'Capture the second checkpoint
+        cPM.Checkpoint "Phase 2"
+
+'------------------------------------------------------------------------------
+' EXPORT STRUCTURED REPORT
+'------------------------------------------------------------------------------
+    'Export the structured checkpoint report
+        Arr = cPM.ReportAsArray
+
+'------------------------------------------------------------------------------
+' ASSERT CHECKPOINT COUNT AND ARRAY SHAPE
+'------------------------------------------------------------------------------
+    'Assert the number of captured checkpoints
+        Test_Assert_EqualLong 2, cPM.CheckpointCount, _
+                              "CheckpointCount after two checkpoints"
+
+    'Assert export row count including the header row
+        Test_Assert_EqualLong 3, UBound(Arr, 1), _
+                              "ReportAsArray row count including header"
+
+    'Assert export column count
+        Test_Assert_EqualLong 8, UBound(Arr, 2), _
+                              "ReportAsArray column count"
+
+'------------------------------------------------------------------------------
+' ASSERT HEADER ROW
+'------------------------------------------------------------------------------
+    'Assert header column 1
+        Test_Assert_EqualString "RunLabel", CStr(Arr(1, 1)), "ReportAsArray header column 1"
+    'Assert header column 2
+        Test_Assert_EqualString "Seq", CStr(Arr(1, 2)), "ReportAsArray header column 2"
+    'Assert header column 3
+        Test_Assert_EqualString "Checkpoint", CStr(Arr(1, 3)), "ReportAsArray header column 3"
+    'Assert header column 4
+        Test_Assert_EqualString "Note", CStr(Arr(1, 4)), "ReportAsArray header column 4"
+    'Assert header column 5
+        Test_Assert_EqualString "MethodID", CStr(Arr(1, 5)), "ReportAsArray header column 5"
+    'Assert header column 6
+        Test_Assert_EqualString "MethodName", CStr(Arr(1, 6)), "ReportAsArray header column 6"
+    'Assert header column 7
+        Test_Assert_EqualString "DeltaSeconds", CStr(Arr(1, 7)), "ReportAsArray header column 7"
+    'Assert header column 8
+        Test_Assert_EqualString "CumulativeSeconds", CStr(Arr(1, 8)), "ReportAsArray header column 8"
+
+'------------------------------------------------------------------------------
+' ASSERT DATA ROWS
+'------------------------------------------------------------------------------
+    'Assert run label export
+        Test_Assert_EqualString "Run A", CStr(Arr(2, 1)), "ReportAsArray row 2 run label"
+        Test_Assert_EqualString "Run A", CStr(Arr(3, 1)), "ReportAsArray row 3 run label"
+
+    'Assert sequence export
+        Test_Assert_EqualLong 1, Arr(2, 2), "ReportAsArray row 2 sequence"
+        Test_Assert_EqualLong 2, Arr(3, 2), "ReportAsArray row 3 sequence"
+
+    'Assert checkpoint-name export
+        Test_Assert_EqualString "Phase 1", CStr(Arr(2, 3)), "ReportAsArray row 2 checkpoint name"
+        Test_Assert_EqualString "Phase 2", CStr(Arr(3, 3)), "ReportAsArray row 3 checkpoint name"
+
+    'Assert note export
+        Test_Assert_EqualString "First phase", CStr(Arr(2, 4)), "ReportAsArray row 2 note"
+        Test_Assert_EqualString vbNullString, CStr(Arr(3, 4)), "ReportAsArray row 3 note"
+
+    'Assert method metadata export
+        Test_Assert_EqualLong 5, Arr(2, 5), "ReportAsArray row 2 method ID"
+        Test_Assert_EqualLong 5, Arr(3, 5), "ReportAsArray row 3 method ID"
+        Test_Assert_EqualString "QPC", CStr(Arr(2, 6)), "ReportAsArray row 2 method name"
+        Test_Assert_EqualString "QPC", CStr(Arr(3, 6)), "ReportAsArray row 3 method name"
+
+'------------------------------------------------------------------------------
+' ASSERT TIMING VALUES
+'------------------------------------------------------------------------------
+    'Assert nonnegative delta/cumulative values
+        Test_Assert_NonNegativeDouble CDbl(Arr(2, 7)), "ReportAsArray row 2 delta is nonnegative"
+        Test_Assert_NonNegativeDouble CDbl(Arr(3, 7)), "ReportAsArray row 3 delta is nonnegative"
+        Test_Assert_NonNegativeDouble CDbl(Arr(2, 8)), "ReportAsArray row 2 cumulative is nonnegative"
+        Test_Assert_NonNegativeDouble CDbl(Arr(3, 8)), "ReportAsArray row 3 cumulative is nonnegative"
+
+    'Assert monotonic cumulative timing
+        Test_Assert_True (CDbl(Arr(3, 8)) >= CDbl(Arr(2, 8))), _
+                         "ReportAsArray cumulative timing is nondecreasing"
+
+CleanExit:
+'------------------------------------------------------------------------------
+' CLEANUP
+'------------------------------------------------------------------------------
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
+        If Not cPM Is Nothing Then
+            cPM.ResetEnvironment
+            Set cPM = Nothing
+        End If
+        On Error GoTo 0
+
+    'Finalize the current case
+        Case_Finalize
+
+    Exit Sub
+
+CleanFail:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+    'Record the unexpected case-level error
+        RecordUnexpectedError "Test_CheckpointCount_And_ReportArray"
+    'Continue through centralized cleanup
+        Resume CleanExit
+
+End Sub
+
+Private Sub Test_ReportAsText_Empty()
+'
+'==============================================================================
+'                        TEST REPORTASTEXT EMPTY
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Validates ReportAsText behavior when no checkpoints exist
+'
+' WHY THIS EXISTS
+'   The class should return a deterministic readable message even when no
+'   checkpoint has been captured
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim TextOut             As String                 'Structured text report
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Start the regression case
+        Case_Begin "ReportAsText when no checkpoints exist"
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
+    'Create a fresh class instance
+        Set cPM = New cPerformanceManager
+
+'------------------------------------------------------------------------------
+' READ EMPTY REPORT
+'------------------------------------------------------------------------------
+    'Read the text report before any checkpoint is captured
+        TextOut = cPM.ReportAsText
+
+'------------------------------------------------------------------------------
+' ASSERT EMPTY REPORT
+'------------------------------------------------------------------------------
+    'Assert that the empty-report message is returned
+        Test_Assert_EqualString "No checkpoints captured.", TextOut, _
+                                "ReportAsText returns the empty-report message before checkpoint capture"
+
+CleanExit:
+'------------------------------------------------------------------------------
+' CLEANUP
+'------------------------------------------------------------------------------
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
+        If Not cPM Is Nothing Then
+            cPM.ResetEnvironment
+            Set cPM = Nothing
+        End If
+        On Error GoTo 0
+
+    'Finalize the current case
+        Case_Finalize
+
+    Exit Sub
+
+CleanFail:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+    'Record the unexpected case-level error
+        RecordUnexpectedError "Test_ReportAsText_Empty"
+    'Continue through centralized cleanup
+        Resume CleanExit
+
+End Sub
+
+
+Private Sub Test_ReportAsText_WithCheckpoints()
+'
+'==============================================================================
+'                 TEST REPORTASTEXT WITH CHECKPOINTS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Validates ReportAsText behavior after checkpoint capture
+'
+' WHY THIS EXISTS
+'   ReportAsText is the main human-readable reporting surface for structured
+'   checkpoint output and should remain readable and semantically complete
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim TextOut             As String                 'Structured text report
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Start the regression case
+        Case_Begin "ReportAsText with checkpoints"
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
+    'Create a fresh class instance
+        Set cPM = New cPerformanceManager
+
+'------------------------------------------------------------------------------
+' PREPARE SESSION
+'------------------------------------------------------------------------------
+    'Start a fresh timing session
+        cPM.StartTimer 5, False
+    'Assign a run label
+        cPM.SetRunLabel "Run A"
+
+'------------------------------------------------------------------------------
+' CAPTURE CHECKPOINTS
+'------------------------------------------------------------------------------
+    'Perform a short pause before the first checkpoint
+        cPM.Pause 0.02, 1
+    'Capture the first checkpoint
+        cPM.Checkpoint "Phase 1", "First phase"
+
+    'Perform a short pause before the second checkpoint
+        cPM.Pause 0.02, 1
+    'Capture the second checkpoint
+        cPM.Checkpoint "Phase 2"
+
+'------------------------------------------------------------------------------
+' READ TEXT REPORT
+'------------------------------------------------------------------------------
+    'Read the human-readable checkpoint report
+        TextOut = cPM.ReportAsText
+
+'------------------------------------------------------------------------------
+' ASSERT TEXT REPORT CONTENT
+'------------------------------------------------------------------------------
+    'Assert that the report title is present
+        Test_Assert_ContainsString TextOut, "CHECKPOINT REPORT", _
+                                   "ReportAsText contains the report title"
+    'Assert that the run label is present
+        Test_Assert_ContainsString TextOut, "RunLabel=Run A", _
+                                   "ReportAsText contains the run label"
+    'Assert that the checkpoint legend line is present
+        Test_Assert_ContainsString TextOut, "Seq | Checkpoint | DeltaSeconds | CumulativeSeconds | MethodName | Note", _
+                                   "ReportAsText contains the column legend"
+    'Assert that the first checkpoint name is present
+        Test_Assert_ContainsString TextOut, "Phase 1", _
+                                   "ReportAsText contains the first checkpoint name"
+    'Assert that the second checkpoint name is present
+        Test_Assert_ContainsString TextOut, "Phase 2", _
+                                   "ReportAsText contains the second checkpoint name"
+    'Assert that the note text is present
+        Test_Assert_ContainsString TextOut, "First phase", _
+                                   "ReportAsText contains the first checkpoint note"
+    'Assert that the method name is present
+        Test_Assert_ContainsString TextOut, "QPC", _
+                                   "ReportAsText contains the method name"
+
+CleanExit:
+'------------------------------------------------------------------------------
+' CLEANUP
+'------------------------------------------------------------------------------
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
+        If Not cPM Is Nothing Then
+            cPM.ResetEnvironment
+            Set cPM = Nothing
+        End If
+        On Error GoTo 0
+
+    'Finalize the current case
+        Case_Finalize
+
+    Exit Sub
+
+CleanFail:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+    'Record the unexpected case-level error
+        RecordUnexpectedError "Test_ReportAsText_WithCheckpoints"
+    'Continue through centralized cleanup
+        Resume CleanExit
+
+End Sub
+
+
+Private Sub Test_ClearCheckpoints()
+'
+'==============================================================================
+'                        TEST CLEARCHECKPOINTS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Validates ClearCheckpoints behavior
+'
+' WHY THIS EXISTS
+'   Callers should be able to clear structured checkpoint/report state without
+'   recreating the class instance
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim Arr                 As Variant                'Structured report export
+    Dim TextOut             As String                 'Structured text report
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Start the regression case
+        Case_Begin "ClearCheckpoints resets checkpoint state"
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
+    'Create a fresh class instance
+        Set cPM = New cPerformanceManager
+
+'------------------------------------------------------------------------------
+' PREPARE SESSION
+'------------------------------------------------------------------------------
+    'Start a fresh timing session
+        cPM.StartTimer 5, False
+    'Assign a run label
+        cPM.SetRunLabel "Run A"
+    'Perform a short pause
+        cPM.Pause 0.02, 1
+    'Capture the first checkpoint
+        cPM.Checkpoint "Phase 1"
+
+'------------------------------------------------------------------------------
+' CLEAR CHECKPOINT STATE
+'------------------------------------------------------------------------------
+    'Clear the structured checkpoint/report state
+        cPM.ClearCheckpoints
+
+'------------------------------------------------------------------------------
+' ASSERT CLEARED STATE
+'------------------------------------------------------------------------------
+    'Assert that the checkpoint counter is reset
+        Test_Assert_EqualLong 0, cPM.CheckpointCount, _
+                              "CheckpointCount is reset by ClearCheckpoints"
+    'Assert that the run label is reset
+        Test_Assert_EqualString vbNullString, cPM.RunLabel, _
+                                "RunLabel is reset by ClearCheckpoints"
+
+'------------------------------------------------------------------------------
+' ASSERT CLEARED EXPORT SURFACES
+'------------------------------------------------------------------------------
+    'Read the structured export array after clearing
+        Arr = cPM.ReportAsArray
+    'Read the text report after clearing
+        TextOut = cPM.ReportAsText
+
+    'Assert header-only array shape
+        Test_Assert_EqualLong 1, UBound(Arr, 1), _
+                              "ReportAsArray returns header-only row count after ClearCheckpoints"
+        Test_Assert_EqualLong 8, UBound(Arr, 2), _
+                              "ReportAsArray column count remains stable after ClearCheckpoints"
+
+    'Assert the empty-report text path
+        Test_Assert_EqualString "No checkpoints captured.", TextOut, _
+                                "ReportAsText returns the empty-report message after ClearCheckpoints"
+
+CleanExit:
+'------------------------------------------------------------------------------
+' CLEANUP
+'------------------------------------------------------------------------------
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
+        If Not cPM Is Nothing Then
+            cPM.ResetEnvironment
+            Set cPM = Nothing
+        End If
+        On Error GoTo 0
+
+    'Finalize the current case
+        Case_Finalize
+
+    Exit Sub
+
+CleanFail:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+    'Record the unexpected case-level error
+        RecordUnexpectedError "Test_ClearCheckpoints"
+    'Continue through centralized cleanup
+        Resume CleanExit
+
+End Sub
+
+
+Private Sub Test_StartTimer_ClearsCheckpointState()
+'
+'==============================================================================
+'                TEST STARTTIMER CLEARS CHECKPOINT STATE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Validates that a new StartTimer session clears checkpoint/report state
+'
+' WHY THIS EXISTS
+'   Checkpoints and run label belong to a timing session and should be reset
+'   deterministically when a new session begins
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim Arr                 As Variant                'Structured report export
+    Dim TextOut             As String                 'Structured text report
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Start the regression case
+        Case_Begin "StartTimer clears checkpoint state"
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
+    'Create a fresh class instance
+        Set cPM = New cPerformanceManager
+
+'------------------------------------------------------------------------------
+' PREPARE FIRST SESSION
+'------------------------------------------------------------------------------
+    'Start the first timing session
+        cPM.StartTimer 5, False
+    'Assign a run label for the first session
+        cPM.SetRunLabel "Run A"
+    'Perform a short pause
+        cPM.Pause 0.02, 1
+    'Capture one checkpoint in the first session
+        cPM.Checkpoint "Phase 1"
+
+'------------------------------------------------------------------------------
+' ASSERT PRE-RESET STATE
+'------------------------------------------------------------------------------
+    'Assert one checkpoint before starting the new session
+        Test_Assert_EqualLong 1, cPM.CheckpointCount, _
+                              "CheckpointCount before starting a new session"
+    'Assert the run label before starting the new session
+        Test_Assert_EqualString "Run A", cPM.RunLabel, _
+                                "RunLabel before starting a new session"
+
+'------------------------------------------------------------------------------
+' START NEW SESSION
+'------------------------------------------------------------------------------
+    'Start a new timing session, which should reset checkpoint/report state
+        cPM.StartTimer 5, False
+
+'------------------------------------------------------------------------------
+' ASSERT RESET STATE
+'------------------------------------------------------------------------------
+    'Assert that checkpoint count is reset for the new session
+        Test_Assert_EqualLong 0, cPM.CheckpointCount, _
+                              "CheckpointCount is reset by StartTimer"
+    'Assert that the run label is reset for the new session
+        Test_Assert_EqualString vbNullString, cPM.RunLabel, _
+                                "RunLabel is reset by StartTimer"
+
+'------------------------------------------------------------------------------
+' ASSERT RESET EXPORT SURFACES
+'------------------------------------------------------------------------------
+    'Read the structured export array after the new session starts
+        Arr = cPM.ReportAsArray
+    'Read the text report after the new session starts
+        TextOut = cPM.ReportAsText
+
+    'Assert header-only array shape after session reset
+        Test_Assert_EqualLong 1, UBound(Arr, 1), _
+                              "ReportAsArray returns header-only row count after StartTimer resets checkpoint state"
+        Test_Assert_EqualLong 8, UBound(Arr, 2), _
+                              "ReportAsArray column count remains stable after StartTimer resets checkpoint state"
+
+    'Assert the empty-report text path after session reset
+        Test_Assert_EqualString "No checkpoints captured.", TextOut, _
+                                "ReportAsText returns the empty-report message after StartTimer resets checkpoint state"
+
+CleanExit:
+'------------------------------------------------------------------------------
+' CLEANUP
+'------------------------------------------------------------------------------
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
+        If Not cPM Is Nothing Then
+            cPM.ResetEnvironment
+            Set cPM = Nothing
+        End If
+        On Error GoTo 0
+
+    'Finalize the current case
+        Case_Finalize
+
+    Exit Sub
+
+CleanFail:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+    'Record the unexpected case-level error
+        RecordUnexpectedError "Test_StartTimer_ClearsCheckpointState"
+    'Continue through centralized cleanup
+        Resume CleanExit
+
+End Sub
 
