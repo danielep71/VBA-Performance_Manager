@@ -50,7 +50,7 @@ Attribute VB_Name = "M_DEMO_BUILDER"
 ' MODULE SETTINGS
 '------------------------------------------------------------------------------
     Option Explicit         'Force explicit declaration of all variables
-    'Option Private Module   'Hide support routines from the Macro dialog
+    Option Private Module   'Hide support routines from the Macro dialog
 
 '------------------------------------------------------------------------------
 ' PUBLIC CONSTANTS
