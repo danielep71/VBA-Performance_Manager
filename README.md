@@ -401,6 +401,12 @@ Framework home:
 
 ---
 
+## Wiki
+
+Consult the github wiki for more details: https://github.com/danielep71/VBA-Performance_Manager/wiki
+
+---
+
 ## License
 
 This project is licensed under the terms in `LICENSE`.
