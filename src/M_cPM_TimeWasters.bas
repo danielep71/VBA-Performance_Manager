@@ -78,7 +78,7 @@ Attribute VB_Name = "M_cPM_TimeWasters"
 '   1.0.0
 '
 ' UPDATED
-'   2026-04-15
+'   2026-04-18
 '
 ' AUTHOR
 '   Daniele Penza
@@ -117,8 +117,8 @@ Attribute VB_Name = "M_cPM_TimeWasters"
         Private g_TW_SCREENUPDATING         As Boolean
         Private g_TW_ENABLEEVENTS           As Boolean
         Private g_TW_DISPLAYALERTS          As Boolean
-        Private g_TW_CALCULATION            As Long
-        Private g_TW_CURSOR                 As Long
+        Private g_TW_CALCULATION            As XlCalculation
+        Private g_TW_CURSOR                 As XlMousePointer
 
 '
 '==============================================================================
@@ -163,6 +163,7 @@ Public Sub PM_TW_BeginSession( _
 '   - Registers or updates this instance in the shared session store
 '   - Recomputes and applies the aggregate effective state
 '   - Rolls back the registration/update if effective-state application fails
+'   - Best-effort reapplies the previous effective state after rollback
 '
 ' ERROR POLICY
 '   Raises errors normally
@@ -181,7 +182,7 @@ Public Sub PM_TW_BeginSession( _
 '     - later calls for same instance => update requested mask
 '
 ' UPDATED
-'   2026-04-15
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -190,6 +191,10 @@ Public Sub PM_TW_BeginSession( _
     Dim HadKeyBefore            As Boolean   'TRUE when the instance was already registered
     Dim PrevDisableMask         As Long      'Previously stored disable-mask for this instance
     Dim WasFirstSession         As Boolean   'TRUE when this call began the first shared session
+
+    Dim SavedErrNumber          As Long      'Captured original error number
+    Dim SavedErrSource          As String    'Captured original error source
+    Dim SavedErrDescription     As String    'Captured original error description
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -207,7 +212,7 @@ Public Sub PM_TW_BeginSession( _
     'Ensure the shared dictionary exists
         PM_TW_EnsureStore
     'Capture whether the key already exists before modification
-        HadKeyBefore = g_TW_Sessions.EXISTS(InstanceKey)
+        HadKeyBefore = g_TW_Sessions.Exists(InstanceKey)
     'Capture whether this call is opening the first shared session
         WasFirstSession = (g_TW_Sessions.Count = 0)
     'Capture the previous disable-mask when this is an update
@@ -218,8 +223,7 @@ Public Sub PM_TW_BeginSession( _
 '------------------------------------------------------------------------------
 ' CAPTURE BASELINE (FIRST ACTIVE SESSION ONLY)
 '------------------------------------------------------------------------------
-    'Capture the original Application state only when the first shared session
-    'begins
+    'Capture the original Application state only when the first shared session begins
         If WasFirstSession Then
             PM_TW_SaveBaseline
         End If
@@ -242,24 +246,57 @@ Public Sub PM_TW_BeginSession( _
 
 ApplyFail:
 '------------------------------------------------------------------------------
+' CAPTURE ORIGINAL ERROR
+'------------------------------------------------------------------------------
+    'Capture the original error before rollback
+        SavedErrNumber = Err.Number
+        SavedErrSource = Err.Source
+        SavedErrDescription = Err.Description
+
+'------------------------------------------------------------------------------
 ' ROLLBACK REGISTRATION / UPDATE
 '------------------------------------------------------------------------------
-    'Restore the prior registration state when effective-state application fails
+    'Rollback must be best-effort so that we can preserve the original error
+        On Error Resume Next
+
+    'Restore the prior registration state
         If HadKeyBefore Then
             g_TW_Sessions(InstanceKey) = PrevDisableMask
-        ElseIf g_TW_Sessions.EXISTS(InstanceKey) Then
+        ElseIf g_TW_Sessions.Exists(InstanceKey) Then
             g_TW_Sessions.Remove InstanceKey
         End If
-    'If this failed first-session begin left the manager idle again, clear the
-    'shared store and baseline flags so the module returns to a true idle state
+
+'------------------------------------------------------------------------------
+' BEST-EFFORT REAPPLY PREVIOUS EFFECTIVE STATE
+'------------------------------------------------------------------------------
+    'If rollback returned the manager to a true idle state, try to restore the
+    'baseline and then clear shared state
         If g_TW_Sessions.Count = 0 Then
-            PM_TW_ResetSharedState
+            If g_TW_BaselineSaved Then
+                Err.Clear
+                PM_TW_ApplyEffectiveState PM_TW_MASK_NONE
+
+                If Err.Number = 0 Then
+                    PM_TW_ResetSharedState
+                End If
+            Else
+                PM_TW_ResetSharedState
+            End If
+    'Otherwise best-effort reapply the prior aggregate effective state
+        Else
+            Err.Clear
+            PM_TW_ApplyEffectiveState PM_TW_AggregateDisableMask()
         End If
+
+        On Error GoTo 0
+
+'------------------------------------------------------------------------------
+' RE-RAISE ORIGINAL ERROR
+'------------------------------------------------------------------------------
     'Re-raise the original error
-        Err.Raise Err.Number, Err.Source, Err.Description
+        Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
 
 End Sub
-
 Public Sub PM_TW_EndSession( _
     ByVal InstanceKey As String)
 '
@@ -290,6 +327,7 @@ Public Sub PM_TW_EndSession( _
 '       * clears the baseline-saved flag
 '       * releases the shared dictionary
 '   - Otherwise recomputes and reapplies the remaining effective state
+'   - Rolls back the removal if effective-state application fails
 '
 ' ERROR POLICY
 '   Raises errors normally
@@ -304,8 +342,18 @@ Public Sub PM_TW_EndSession( _
 '     - if the instance is not present, no removal occurs
 '
 ' UPDATED
-'   2026-04-15
+'   2026-04-18
 '==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim HadKeyBefore            As Boolean   'TRUE when the instance was registered before removal
+    Dim PrevDisableMask         As Long      'Previously stored disable-mask for this instance
+
+    Dim SavedErrNumber          As Long      'Captured original error number
+    Dim SavedErrSource          As String    'Captured original error source
+    Dim SavedErrDescription     As String    'Captured original error description
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -324,29 +372,86 @@ Public Sub PM_TW_EndSession( _
         If g_TW_Sessions Is Nothing Then Exit Sub
 
 '------------------------------------------------------------------------------
+' CAPTURE PRE-REMOVAL STATE
+'------------------------------------------------------------------------------
+    'Capture whether the instance is currently registered
+        HadKeyBefore = g_TW_Sessions.Exists(InstanceKey)
+
+    'Capture the previous disable-mask when present
+        If HadKeyBefore Then
+            PrevDisableMask = CLng(g_TW_Sessions(InstanceKey))
+        End If
+
+'------------------------------------------------------------------------------
 ' REMOVE INSTANCE (IF PRESENT)
 '------------------------------------------------------------------------------
     'Remove the calling instance from the active session set
-        If g_TW_Sessions.EXISTS(InstanceKey) Then
+        If HadKeyBefore Then
             g_TW_Sessions.Remove InstanceKey
         End If
 
 '------------------------------------------------------------------------------
 ' RESTORE OR REAPPLY
 '------------------------------------------------------------------------------
+        On Error GoTo ApplyFail
+
     'If no sessions remain, restore the original baseline
         If g_TW_Sessions.Count = 0 Then
-            'Restore the original Application state only if a baseline was
-            'actually captured
+            'Restore the original Application state only if a baseline was actually captured
                 If g_TW_BaselineSaved Then
                     PM_TW_ApplyEffectiveState PM_TW_MASK_NONE
                 End If
+
             'Return to a clean idle shared-state baseline
                 PM_TW_ResetSharedState
+
+            On Error GoTo 0
             Exit Sub
         End If
+
     'Otherwise recompute and apply the remaining aggregate disable-mask
         PM_TW_ApplyEffectiveState PM_TW_AggregateDisableMask()
+        On Error GoTo 0
+
+    Exit Sub
+
+ApplyFail:
+'------------------------------------------------------------------------------
+' CAPTURE ORIGINAL ERROR
+'------------------------------------------------------------------------------
+    'Capture the original error before rollback
+        SavedErrNumber = Err.Number
+        SavedErrSource = Err.Source
+        SavedErrDescription = Err.Description
+
+'------------------------------------------------------------------------------
+' ROLLBACK REMOVAL
+'------------------------------------------------------------------------------
+    'Rollback must be best-effort so that we can preserve the original error
+        On Error Resume Next
+    'Restore the removed instance registration when it existed before the call
+        If HadKeyBefore Then
+            g_TW_Sessions(InstanceKey) = PrevDisableMask
+        End If
+
+'------------------------------------------------------------------------------
+' BEST-EFFORT REAPPLY PREVIOUS EFFECTIVE STATE
+'------------------------------------------------------------------------------
+    'Best-effort reapply the prior aggregate effective state
+        If Not g_TW_Sessions Is Nothing Then
+            If g_TW_Sessions.Count > 0 Then
+                Err.Clear
+                PM_TW_ApplyEffectiveState PM_TW_AggregateDisableMask()
+            End If
+        End If
+
+        On Error GoTo 0
+
+'------------------------------------------------------------------------------
+' RE-RAISE ORIGINAL ERROR
+'------------------------------------------------------------------------------
+    'Re-raise the original error
+        Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
 
 End Sub
 
@@ -467,7 +572,7 @@ Public Function PM_TW_IsInstanceActive( _
 ' ASSIGN RESULT
 '------------------------------------------------------------------------------
     'Return instance activity state
-        PM_TW_IsInstanceActive = g_TW_Sessions.EXISTS(InstanceKey)
+        PM_TW_IsInstanceActive = g_TW_Sessions.Exists(InstanceKey)
 
 End Function
 
@@ -898,3 +1003,121 @@ Public Sub PM_TW_EndAllSessions()
 
 End Sub
 
+'
+'------------------------------------------------------------------------------
+'
+'                       HELPERS FOR WORKSHEET OUTPUT
+'
+'------------------------------------------------------------------------------
+'
+
+Public Sub cPM_Report_WriteToRange( _
+    ByVal cPM As cPerformanceManager, _
+    ByVal TargetTopLeft As Range, _
+    Optional ByVal ClearOutputArea As Boolean = False)
+'
+'==============================================================================
+'                         REPORT WRITE TO RANGE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Writes the structured checkpoint report to a worksheet range
+'
+' WHY THIS EXISTS
+'   The class should own timing and structured capture, while worksheet output
+'   belongs more naturally in a standard helper module
+'
+' INPUTS
+'   cPM
+'     Source cPerformanceManager instance
+'
+'   TargetTopLeft
+'     Top-left output cell for the report
+'
+'   ClearOutputArea (optional)
+'     TRUE  => clears the CurrentRegion of TargetTopLeft first
+'     FALSE => writes only into the resized target report block
+'
+' RETURNS
+'   None
+'
+' BEHAVIOR
+'   - Reads the report as a 2D array
+'   - Writes it to the target worksheet
+'   - Applies lightweight formatting to headers and numeric columns
+'
+' ERROR POLICY
+'   Raises errors normally
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Data                As Variant              'Structured report array
+    Dim RowCount            As Long                 'Report row count
+    Dim ColCount            As Long                 'Report column count
+    Dim OutputRange         As Range                'Resolved output range
+
+'------------------------------------------------------------------------------
+' VALIDATE
+'------------------------------------------------------------------------------
+    'Reject a missing class instance
+        If cPM Is Nothing Then
+            Err.Raise vbObjectError + 2600, _
+                      "M_cPM_ReportHelpers.cPM_Report_WriteToRange", _
+                      "cPerformanceManager instance cannot be Nothing."
+        End If
+    'Reject a missing output anchor cell
+        If TargetTopLeft Is Nothing Then
+            Err.Raise vbObjectError + 2601, _
+                      "M_cPM_ReportHelpers.cPM_Report_WriteToRange", _
+                      "TargetTopLeft cannot be Nothing."
+        End If
+
+'------------------------------------------------------------------------------
+' READ REPORT ARRAY
+'------------------------------------------------------------------------------
+    'Read the structured checkpoint report as a 2D array
+        Data = cPM.ReportAsArray
+    'Resolve the report dimensions
+        RowCount = UBound(Data, 1)
+        ColCount = UBound(Data, 2)
+
+'------------------------------------------------------------------------------
+' RESOLVE OUTPUT RANGE
+'------------------------------------------------------------------------------
+    'Resolve the resized output range
+        Set OutputRange = TargetTopLeft.Resize(RowCount, ColCount)
+
+'------------------------------------------------------------------------------
+' OPTIONAL CLEAR
+'------------------------------------------------------------------------------
+    'Clear the surrounding output area when requested
+        If ClearOutputArea Then
+            TargetTopLeft.CurrentRegion.Clear
+        End If
+
+'------------------------------------------------------------------------------
+' WRITE REPORT
+'------------------------------------------------------------------------------
+    'Write the structured report array into the worksheet
+        OutputRange.Value = Data
+
+'------------------------------------------------------------------------------
+' FORMAT OUTPUT
+'------------------------------------------------------------------------------
+    'Format the header row
+        With OutputRange.Rows(1)
+            .Font.Bold = True
+            .HorizontalAlignment = xlCenter
+            .VerticalAlignment = xlCenter
+        End With
+    'Format numeric timing columns
+        OutputRange.Columns(7).NumberFormat = "0.000000000"
+        OutputRange.Columns(8).NumberFormat = "0.000000000"
+    'Apply lightweight autofit
+        OutputRange.EntireColumn.AutoFit
+
+End Sub
