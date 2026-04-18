@@ -403,7 +403,7 @@ Framework home:
 
 ## Wiki
 
-Consult the github wiki for more details: https://github.com/danielep71/VBA-Performance_Manager.wiki.git
+Consult the github wiki for more details: https://github.com/danielep71/VBA-Performance_Manager/wiki
 
 ---
 
