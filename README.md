@@ -25,11 +25,11 @@ The shared Excel “time-waster” suppression features are not limited to timed
 ```text
 /README.md
 /src/cPerformanceManager.cls
-/src/M_cPM_TIMEWASTERS.bas
+/src/M_cPM_TimeWasters.bas
 /examples/M_cPM_DEMO.bas
 /examples/M_cPM_USAGE_EXAMPLES.bas
 /examples/M_DEMO_BUILDER.bas
-/test/M_cPM_TEST.bas
+/test/M_cPM_Test.bas
 ```
 
 ### Required files
@@ -37,7 +37,7 @@ The shared Excel “time-waster” suppression features are not limited to timed
 These two files are required for normal use:
 
 - `src/cPerformanceManager.cls`
-- `src/M_cPM_TIMEWASTERS.bas`
+- `src/M_cPM_TimeWasters.bas`
 
 ### Optional companion files
 
@@ -45,7 +45,7 @@ These files are optional but useful:
 
 - `examples/M_cPM_USAGE_EXAMPLES.bas`
   - compact usage examples and recommended integration patterns
-- `test/M_cPM_TEST.bas`
+- `test/M_cPM_Test.bas`
   - regression test harness
 
 ---
@@ -85,7 +85,7 @@ These files are optional but useful:
 - `VBA7` / `Win64` conditional-compilation support as required by the host
 - Required source files:
   - `cPerformanceManager.cls`
-  - `M_cPM_TIMEWASTERS.bas`
+  - `M_cPM_TimeWasters.bas`
 
 ---
 
@@ -95,12 +95,12 @@ These files are optional but useful:
 2. Open the VBA Editor (`ALT + F11`).
 3. Import:
    - `src/cPerformanceManager.cls`
-   - `src/M_cPM_TIMEWASTERS.bas`
+   - `src/M_cPM_TimeWasters.bas`
 4. Save as macro-enabled (`.xlsm` / `.xlam`).
 5. Compile (`Debug` → `Compile VBAProject`).
 6. Run a smoke test.
 
-Optional: also import `examples/M_cPM_USAGE_EXAMPLES.bas` and `test/M_cPM_TEST.bas`.
+Optional: also import `examples/M_cPM_USAGE_EXAMPLES.bas` and `test/M_cPM_Test.bas`.
 
 ---
 
@@ -287,7 +287,7 @@ cPM.TW_Turn_OFF TW_Enum.ScreenUpdating Or TW_Enum.EnableEvents
 ## Running Examples / Tests
 
 - Import `examples/M_cPM_USAGE_EXAMPLES.bas` for compact usage examples.
-- Import `test/M_cPM_TEST.bas` and run:
+- Import `test/M_cPM_Test.bas` and run:
   - `Run_cPerformanceManager_RegressionSuite`
 
 ---
