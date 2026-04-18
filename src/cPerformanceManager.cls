@@ -18,7 +18,9 @@ Attribute VB_Exposed = False
 '     - low-overhead numeric elapsed-time measurement
 '     - human-readable elapsed-time diagnostics
 '     - optional formatting of an already measured elapsed-seconds value
-'     - optional shared Excel "time-waster" suppression for benchmark runs
+'     - optional shared Excel "time-waster" suppression for benchmark runs and
+'       for general Excel/VBA performance improvement in heavy procedures
+'     - structured named checkpoints with numeric delta/cumulative reporting
 '
 ' WHY THIS EXISTS
 '   - VBA Timer() has limited resolution and rolls over at midnight.
@@ -26,9 +28,10 @@ Attribute VB_Exposed = False
 '     better suited to instrumentation and benchmarking.
 '   - A single, consistent API reduces timing mistakes, duplicated code, and
 '     backend-specific handling across modules.
-'   - Excel benchmark runs often benefit from temporarily suppressing expensive
-'     Application behaviors such as ScreenUpdating, EnableEvents,
-'     DisplayAlerts, Calculation, and Cursor changes.
+'   - Excel benchmark runs and heavy workbook automation often benefit from
+'     temporarily suppressing expensive Application behaviors such as
+'     ScreenUpdating, EnableEvents, DisplayAlerts, Calculation, and Cursor
+'     changes.
 '
 ' COMPATIBILITY
 '   - Windows only for API-backed timing methods (2..5).
@@ -85,12 +88,12 @@ Attribute VB_Exposed = False
 '     overlapping instances can coexist without corrupting Application state.
 '
 ' UPDATED
-'   2026-04-15
+'   2026-04-18
 '
 ' AUTHOR
 '   Daniele Penza
 '
-' VERSION: 1.0.0
+' VERSION: 1.1.0
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -137,6 +140,18 @@ Attribute VB_Exposed = False
         Units       As Long     'Milliseconds when wType = 1
         smpteVal    As SMPTE    'Unused here; retained for structure layout
         songPtrPos  As Long
+    End Type
+
+    'Structured checkpoint row captured within one active timing session
+    Private Type tCheckpointRow
+        Seq                     As Long      'Checkpoint sequence number
+        NameText                As String    'Checkpoint label
+        NoteText                As String    'Optional checkpoint note
+        DeltaSecondsValue       As Double    'Elapsed seconds since previous checkpoint
+        ElapsedSecondsValue     As Double    'Cumulative elapsed seconds since StartTimer
+        MethodID                As Integer   'Active method identifier
+        MethodNameText          As String    'Active method descriptive name
+        RunLabelText            As String    'Optional run label
     End Type
 
 '
@@ -331,6 +346,14 @@ Attribute VB_Exposed = False
     '--------------------------------------------------------------------------
         Private m_TW_Active As Boolean   'TRUE when this instance is registered in shared TW suppression
         Private m_Except    As TW_Enum   'Current exemption mask requested by this instance
+    
+    '--------------------------------------------------------------------------
+    ' CHECKPOINT / STRUCTURED REPORT STATE
+    '--------------------------------------------------------------------------
+        Private m_RunLabel              As String                'Optional run label for the current timing session
+        Private m_CheckpointCount       As Long                  'Number of captured checkpoints
+        Private m_LastCheckpointS       As Double                'Last cumulative checkpoint elapsed seconds
+        Private m_Checkpoints()         As tCheckpointRow        'Checkpoint storage array
 
 '
 '------------------------------------------------------------------------------
@@ -369,6 +392,7 @@ Private Sub Class_Initialize()
 '   - Loads the timer method labels used by MethodName().
 '   - Resets timing-session state.
 '   - Resets TW lifecycle flags for this instance.
+'   - Initializes structured checkpoint / report state.
 '
 ' ERROR POLICY
 '   Does not raise an error if QPC is unavailable.
@@ -383,7 +407,7 @@ Private Sub Class_Initialize()
 '   None.
 '
 ' UPDATED
-'   2026-03-28
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -396,10 +420,8 @@ Private Sub Class_Initialize()
 '------------------------------------------------------------------------------
     'Query the high-resolution performance counter frequency once
         RC = QueryPerformanceFrequency(m_qpcFreq)
-
     'Record whether QPC is available and usable
         m_QpcAvailable = (RC <> 0 And m_qpcFreq <> 0)
-
     'Configure timeGetSystemTime's MMTIME format to milliseconds
         m_Mmt.wType = 1
 
@@ -424,31 +446,35 @@ Private Sub Class_Initialize()
 '------------------------------------------------------------------------------
     'Guard for timeBeginPeriod/timeEndPeriod lifecycle
         m_TimePeriodOn = False
-
     'Default exemption mask for TW_Turn_OFF
         m_Except = TW_Enum.None
-
     'Initialize active timer session state
         m_ActiveMethodID = 0
-
     'Mark that no timer session is active yet
         m_HasActiveSession = False
-
     'Default strict-mode policy
         m_StrictMode = True
-
     'Clear cached generic timing values deterministically
         m_T1 = 0#
         m_T2 = 0#
         m_ET = 0#
-
     'Clear cached QPC timing values deterministically
         m_qpcStart = 0@
-
         m_qpcEnd = 0@
-
     'Indicates whether this instance currently owns an active shared TW session
         m_TW_Active = False
+'------------------------------------------------------------------------------
+' INITIALIZE (CHECKPOINT / REPORT STATE)
+'------------------------------------------------------------------------------
+    'Clear the optional run label
+        m_RunLabel = vbNullString
+    'Initialize the checkpoint counter
+        m_CheckpointCount = 0
+    'Initialize the last checkpoint elapsed-seconds marker
+        m_LastCheckpointS = 0#
+    'Initialize checkpoint storage with a small first capacity
+        ReDim m_Checkpoints(1 To 1)
+        
 End Sub
 
 Private Sub Class_Terminate()
@@ -535,6 +561,7 @@ Public Sub StartTimer(Optional ByVal iMethod As Integer = 5, _
 '   - Binds the validated method to the current timing session.
 '   - Marks the session as started.
 '   - Clears cached end/elapsed state from any prior session.
+'   - Starts a fresh structured checkpoint session for the new timing run.
 '   - Captures the start timestamp using the selected backend.
 '   - Handles QPC separately because it uses Currency-based tick storage.
 '
@@ -556,7 +583,7 @@ Public Sub StartTimer(Optional ByVal iMethod As Integer = 5, _
 '     stored in Currency fields rather than Double-based wall/tick seconds.
 '
 ' UPDATED
-'   2026-03-28
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -570,15 +597,15 @@ Public Sub StartTimer(Optional ByVal iMethod As Integer = 5, _
 '------------------------------------------------------------------------------
     'Bind the selected method to the active timing session
         m_ActiveMethodID = iMethod
-
     'Mark the timer session as started
         m_HasActiveSession = True
-
     'Clear cached end/elapsed values for this new session
         m_T2 = 0#
         m_ET = 0#
         m_qpcEnd = 0@
-
+    'Start a fresh checkpoint session for the new timing run
+        Checkpoint_ClearState
+        
 '------------------------------------------------------------------------------
 ' METHOD 5: QPC (HIGH RESOLUTION)
 '------------------------------------------------------------------------------
@@ -590,10 +617,8 @@ Public Sub StartTimer(Optional ByVal iMethod As Integer = 5, _
                 Else
                     QueryPerformanceCounter m_qpcStart
                 End If
-
             'Mirror the raw start tick into the generic start slot
                 m_T1 = CDbl(m_qpcStart)
-
             Exit Sub
         End If
 
@@ -832,7 +857,7 @@ Public Function ElapsedTime( _
 '   - When ElapsedSecondsIn is supplied, no new timing sample is taken
 '
 ' UPDATED
-'   2026-04-15
+'   2026-04-18
 '==============================================================================
     
 '------------------------------------------------------------------------------
@@ -858,7 +883,6 @@ Public Function ElapsedTime( _
     'Use the supplied elapsed-seconds value when provided
         If Not IsMissing(ElapsedSecondsIn) Then
             Sec = CDbl(ElapsedSecondsIn)
-    
     'Otherwise measure elapsed seconds now
         Else
             Sec = ElapsedSeconds(iMethod)
@@ -876,24 +900,27 @@ Public Function ElapsedTime( _
     'Extract whole seconds and the fractional remainder
         WholeS = CLng(Fix(Sec))
         Frac = Sec - CDbl(WholeS)
-
     'Defensive clamp for negative fractional jitter
         If Frac < 0# Then Frac = 0#
-
+        
 '------------------------------------------------------------------------------
 ' CONVERT FRACTIONAL SECONDS TO ns/ms/us/nnn
 '------------------------------------------------------------------------------
-    'Convert fractional seconds to integer nanoseconds
-        NS_Total = CLng(Frac * 1000000000#)
-
-    'Defensive clamp for unexpected negative values
-        If NS_Total < 0 Then NS_Total = 0
-
+    'Convert fractional seconds to integer nanoseconds using floor semantics
+        NS_Total = CLng(Fix(Frac * 1000000000#))
+    'Defensively clamp unexpected negative values
+        If NS_Total < 0 Then
+            NS_Total = 0
+        End If
+    'Defensively clamp unexpected overflow to one-second boundary
+        If NS_Total > 999999999 Then
+            NS_Total = 999999999
+        End If
     'Decompose nanoseconds into mmm / uuu / nnn display groups
         Ms = NS_Total \ 1000000
         Us = (NS_Total \ 1000) Mod 1000
         NN = NS_Total Mod 1000
-
+        
 '------------------------------------------------------------------------------
 ' DECOMPOSE WHOLE-SECOND DURATION
 '------------------------------------------------------------------------------
@@ -957,7 +984,7 @@ Public Property Get T1() As Double
 '   - The meaning of the value depends on the active timing backend used when
 '     StartTimer() was called:
 '       * Method 1 (Timer)             : seconds since midnight
-'       * Method 2 (GetTickCount)      : seconds since boot (wrapper-normalized)
+'       * Method 2 (GetTickCount / GetTickCount64) : seconds since boot (wrapper-normalized)
 '       * Method 3 (timeGetTime)       : seconds since boot (wrapper-normalized)
 '       * Method 4 (timeGetSystemTime) : seconds from a millisecond source
 '       * Method 5 (QPC)               : CDbl(m_qpcStart), i.e. raw QPC ticks
@@ -1088,6 +1115,7 @@ Public Property Get ET() As Double
     'Return the cached elapsed seconds.
         ET = m_ET
 End Property
+
 Public Property Get StrictMode() As Boolean
 '------------------------------------------------------------------------------
 ' STRICT MODE
@@ -1147,8 +1175,9 @@ Public Property Get MethodName( _
 '   StartTimer() / ElapsedSeconds() to a readable backend label for diagnostics,
 '   reporting, and UI/debug output.
 '
-' Idx
-'   Timing method index:
+' INPUTS
+'   Idx
+'     Timing method index:
 '       1 = "Timer"
 '       2 = "GetTickCount / GetTickCount64"
 '       3 = "timeGetTime"
@@ -1196,6 +1225,41 @@ Public Property Get MethodName( _
     'Return the corresponding method label.
         MethodName = m_MethodName(Idx)
 End Property
+
+Public Property Get RunLabel() As String
+'
+'==============================================================================
+'                                  RUN LABEL
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns the current run label stored on this instance
+'
+' WHY THIS EXISTS
+'   Structured reporting helpers and diagnostics may need to inspect the
+'   current run label without exporting the full checkpoint report
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   String
+'     Current run label
+'
+' ERROR POLICY
+'   Does not raise errors
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' ASSIGN RESULT
+'------------------------------------------------------------------------------
+    'Return the current run label
+        RunLabel = m_RunLabel
+
+End Property
+
 '
 '------------------------------------------------------------------------------
 '
@@ -1257,50 +1321,72 @@ Public Function OverheadMeasurement_Seconds( _
 '     noise.
 '   - Method 3 may incur one-time initialization effects on first use because
 '     EnsureTimerResolution1ms can activate 1ms timer resolution.
+'   - Performs the measurement on an isolated temporary cPerformanceManager
+'     instance so that the caller's current checkpoint / report state is not
+'     disturbed.
 '
 ' UPDATED
-'   2026-03-28
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim K               As Long      'Loop counter
-    Dim TotalS          As Double    'Accumulated elapsed seconds
-    Dim ResolvedMethod  As Integer   'Validated timer method
-    Dim WarmUpS         As Double    'Throwaway elapsed value used only for warm-up
+    Dim K               As Long                  'Loop counter
+    Dim TotalS          As Double                'Accumulated elapsed seconds
+    Dim ResolvedMethod  As Integer               'Validated timer method
+    Dim WarmUpS         As Double                'Throwaway elapsed value used only for warm-up
+    Dim cPM_Work        As cPerformanceManager   'Isolated worker instance
 
 '------------------------------------------------------------------------------
 ' VALIDATE
 '------------------------------------------------------------------------------
-    'Enforce a minimum of one iteration.
+    'Enforce a minimum of one iteration
         If Iterations < 1 Then Iterations = 1
-
-    'Normalize and validate the timer method.
+    'Normalize and validate the timer method using the current instance policy
         ResolvedMethod = Method_NormalizeStart(iMethod)
+
+'------------------------------------------------------------------------------
+' INITIALIZE ISOLATED WORKER
+'------------------------------------------------------------------------------
+    'Create an isolated worker instance so checkpoint/report state on the
+    'current instance is not disturbed
+        Set cPM_Work = New cPerformanceManager
+    'Mirror the current strict-mode policy into the isolated worker
+        cPM_Work.StrictMode = m_StrictMode
 
 '------------------------------------------------------------------------------
 ' WARM UP
 '------------------------------------------------------------------------------
-    'Warm up the timing path once before measurement.
-        StartTimer ResolvedMethod, False
-        WarmUpS = ElapsedSeconds()
+    'Warm up the timing path once before measurement
+        cPM_Work.StartTimer ResolvedMethod, False
+        WarmUpS = cPM_Work.ElapsedSeconds()
 
 '------------------------------------------------------------------------------
 ' MEASURE
 '------------------------------------------------------------------------------
-    'Run a repeated near-empty timing loop and accumulate the measured elapsed values.
+    'Run a repeated near-empty timing loop and accumulate the measured elapsed values
         For K = 1 To Iterations
-            StartTimer ResolvedMethod, False
-            TotalS = TotalS + ElapsedSeconds()
+            cPM_Work.StartTimer ResolvedMethod, False
+            TotalS = TotalS + cPM_Work.ElapsedSeconds()
         Next K
 
 '------------------------------------------------------------------------------
 ' ASSIGN RESULT
 '------------------------------------------------------------------------------
-    'Return the average measurement overhead in seconds.
+    'Return the average measurement overhead in seconds
         OverheadMeasurement_Seconds = TotalS / CDbl(Iterations)
+
+'------------------------------------------------------------------------------
+' CLEANUP
+'------------------------------------------------------------------------------
+    'Release isolated worker environment changes
+        cPM_Work.ResetEnvironment
+    'Release the isolated worker instance
+        Set cPM_Work = Nothing
+
 End Function
+
 Public Property Get OverheadMeasurement_Text( _
     Optional ByVal iMethod As Integer = 5, _
     Optional ByVal Iterations As Long = 1000) _
@@ -1369,7 +1455,6 @@ Public Property Get OverheadMeasurement_Text( _
 '------------------------------------------------------------------------------
     'Normalize and validate the timer method
         ResolvedMethod = Method_NormalizeStart(iMethod)
-
     'Measure average near-empty overhead
         AvgS = OverheadMeasurement_Seconds(ResolvedMethod, Iterations)
 
@@ -1691,8 +1776,8 @@ Public Sub Pause( _
 '   - Method 2 is midnight-safe because it measures elapsed delta rather than
 '     comparing Timer() against an absolute target.
 '   - Methods 3 and 4 use a Timer()-based guard loop specifically because
-'     Application.Wait and Now are too coarse to guarantee a 1-second pause
-'     accurately on their own.
+'     Application.Wait and Now are too coarse to guarantee the requested pause
+'     duration accurately on their own.
 '   - This routine uses local elapsed-time variables and does not overwrite the
 '     class-level m_ET timing cache.
 '
@@ -1717,7 +1802,6 @@ Public Sub Pause( _
 '------------------------------------------------------------------------------
     'Reject non-positive pauses (no-op)
         If dSeconds <= 0# Then Exit Sub
-
     'Hard cap to avoid accidental long blocking pauses
         If dSeconds > 3600# Then Exit Sub
 
@@ -1893,7 +1977,6 @@ Public Sub ResetEnvironment()
     'restore/recompute correctly depending on whether other instances remain
         If m_TW_Active Then
             PM_TW_EndSession TW_InstanceKey()
-
             m_TW_Active = False
             m_Except = TW_Enum.None
         End If
@@ -2058,6 +2141,466 @@ Public Property Get TW_ActiveSessionCount() As Long
     'Return the global active shared TW session count.
         TW_ActiveSessionCount = PM_TW_ActiveCount()
 End Property
+
+
+'
+'------------------------------------------------------------------------------
+'
+'                 PUBLIC: CHECKPOINTS / STRUCTURED REPORTING
+'
+'------------------------------------------------------------------------------
+'
+
+Public Sub SetRunLabel( _
+    ByVal RunLabel As String)
+'
+'==============================================================================
+'                                SET RUN LABEL
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Stores an optional run label used by later checkpoint captures
+'
+' WHY THIS EXISTS
+'   Structured checkpoint output is easier to interpret when rows can be tagged
+'   with a user-supplied run label such as:
+'
+'     - ImportWorkflow
+'     - ScenarioA
+'     - Baseline
+'     - TW_Off
+'
+'   To keep report output unambiguous, the run label must be set before the
+'   first checkpoint is captured in the current timing session
+'
+' INPUTS
+'   RunLabel
+'     User-defined label for the current timing run
+'
+' RETURNS
+'   None
+'
+' BEHAVIOR
+'   - Stores the supplied text as the current run label
+'   - Raises if the caller attempts to change the run label after one or more
+'     checkpoints have already been captured in the current session
+'
+' ERROR POLICY
+'   Raises when the caller attempts to change the run label after checkpoint
+'   capture has already begun in the current timing session
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' VALIDATE SESSION CHECKPOINT STATE
+'------------------------------------------------------------------------------
+    'Reject run-label changes after checkpoint capture has already begun
+        If m_CheckpointCount > 0 Then
+            Err.Raise vbObjectError + 1011, _
+                      "cPerformanceManager.SetRunLabel", _
+                      "RunLabel must be set before the first checkpoint of the current timing session."
+        End If
+
+'------------------------------------------------------------------------------
+' ASSIGN STATE
+'------------------------------------------------------------------------------
+    'Store the supplied run label
+        m_RunLabel = RunLabel
+
+End Sub
+Public Sub ClearCheckpoints()
+'
+'==============================================================================
+'                              CLEAR CHECKPOINTS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Clears the structured checkpoint state for the current instance
+'
+' WHY THIS EXISTS
+'   Although a new StartTimer session already resets checkpoint state, callers
+'   may also want to clear the current structured checkpoint / report state
+'   explicitly without recreating the object
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
+' BEHAVIOR
+'   - Clears the current run label
+'   - Clears the checkpoint counter
+'   - Resets the last checkpoint elapsed-seconds marker
+'   - Reinitializes checkpoint storage
+'
+' ERROR POLICY
+'   Raises errors normally
+'
+' DEPENDENCIES
+'   - Checkpoint_ClearState
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' CLEAR STATE
+'------------------------------------------------------------------------------
+    'Clear all checkpoint / report state explicitly
+        Checkpoint_ClearState
+
+End Sub
+Public Sub Checkpoint( _
+    ByVal CheckpointName As String, _
+    Optional ByVal NoteText As String = vbNullString)
+'
+'==============================================================================
+'                                  CHECKPOINT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Captures one named checkpoint within the current timing session
+'
+' WHY THIS EXISTS
+'   A single elapsed-time value is useful, but many real workflows need
+'   structured sub-measurements such as:
+'
+'     - LoadData
+'     - BuildArray
+'     - Transform
+'     - WriteBack
+'
+'   This routine records both:
+'
+'     - cumulative elapsed seconds since StartTimer
+'     - delta seconds since the previous checkpoint
+'
+' INPUTS
+'   CheckpointName
+'     User-defined checkpoint label
+'
+'   NoteText (optional)
+'     Optional descriptive note stored with the checkpoint row
+'
+' RETURNS
+'   None
+'
+' BEHAVIOR
+'   - Requires an active timing session
+'   - Captures cumulative elapsed seconds once
+'   - Computes delta seconds versus the previous checkpoint
+'   - Appends one structured checkpoint row
+'   - Updates the last checkpoint marker
+'
+' ERROR POLICY
+'   Raises when no timing session is active
+'   Otherwise delegates timing validation behavior to ElapsedSeconds
+'
+' DEPENDENCIES
+'   - ElapsedSeconds
+'   - MethodName
+'   - Checkpoint_EnsureCapacity
+'   - Checkpoint_DefaultName
+'
+' NOTES
+'   This routine intentionally captures numeric timing only
+'   It does not call ElapsedTime and therefore avoids formatting overhead
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim CurrentS            As Double       'Current cumulative elapsed seconds
+    Dim DeltaS              As Double       'Elapsed seconds since previous checkpoint
+    Dim NextSeq             As Long         'Next checkpoint sequence number
+    Dim EffectiveName       As String       'Normalized checkpoint label
+
+'------------------------------------------------------------------------------
+' VALIDATE SESSION STATE
+'------------------------------------------------------------------------------
+    'Reject checkpoint capture when no timing session is active
+        If Not m_HasActiveSession Then
+            Err.Raise vbObjectError + 1010, _
+                      "cPerformanceManager.Checkpoint", _
+                      "Checkpoint cannot be captured before StartTimer."
+        End If
+
+'------------------------------------------------------------------------------
+' RESOLVE CURRENT ELAPSED TIME
+'------------------------------------------------------------------------------
+    'Read the current cumulative elapsed seconds for the active session
+        CurrentS = Me.ElapsedSeconds
+
+'------------------------------------------------------------------------------
+' RESOLVE CHECKPOINT NAME
+'------------------------------------------------------------------------------
+    'Normalize the checkpoint label and auto-generate one when blank
+        EffectiveName = Trim$(CheckpointName)
+    'Use a generated label when the caller supplied a blank checkpoint name
+        If Len(EffectiveName) = 0 Then
+            EffectiveName = Checkpoint_DefaultName(m_CheckpointCount + 1)
+        End If
+
+'------------------------------------------------------------------------------
+' COMPUTE DELTA / SEQUENCE
+'------------------------------------------------------------------------------
+    'Resolve the next checkpoint sequence number
+        NextSeq = m_CheckpointCount + 1
+
+    'Compute elapsed seconds since the previous checkpoint
+        DeltaS = CurrentS - m_LastCheckpointS
+
+    'Defensively clamp negative jitter
+        If DeltaS < 0# Then
+            DeltaS = 0#
+        End If
+
+'------------------------------------------------------------------------------
+' ENSURE STORAGE CAPACITY
+'------------------------------------------------------------------------------
+    'Ensure checkpoint storage can hold the new row
+        Checkpoint_EnsureCapacity NextSeq
+
+'------------------------------------------------------------------------------
+' APPEND CHECKPOINT ROW
+'------------------------------------------------------------------------------
+    'Write the structured checkpoint row
+        With m_Checkpoints(NextSeq)
+            .Seq = NextSeq
+            .NameText = EffectiveName
+            .NoteText = NoteText
+            .DeltaSecondsValue = DeltaS
+            .ElapsedSecondsValue = CurrentS
+            .MethodID = m_ActiveMethodID
+            .MethodNameText = MethodName(m_ActiveMethodID)
+            .RunLabelText = m_RunLabel
+        End With
+
+'------------------------------------------------------------------------------
+' UPDATE STATE
+'------------------------------------------------------------------------------
+    'Persist the new checkpoint count
+        m_CheckpointCount = NextSeq
+    'Persist the most recent cumulative checkpoint elapsed seconds
+        m_LastCheckpointS = CurrentS
+
+End Sub
+Public Property Get CheckpointCount() As Long
+'
+'==============================================================================
+'                              CHECKPOINT COUNT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns the number of captured structured checkpoints
+'
+' WHY THIS EXISTS
+'   Callers often need a lightweight way to know whether checkpoint rows exist
+'   and how many were captured
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Long
+'     Number of captured checkpoints
+'
+' ERROR POLICY
+'   Does not raise errors
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' ASSIGN RESULT
+'------------------------------------------------------------------------------
+    'Return the number of captured checkpoints
+        CheckpointCount = m_CheckpointCount
+
+End Property
+
+Public Function ReportAsArray() As Variant
+'
+'==============================================================================
+'                               REPORT AS ARRAY
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Exports the structured checkpoint report as a 2D Variant array
+'
+' WHY THIS EXISTS
+'   A 2D array is the most reusable machine-readable report surface because it
+'   can be:
+'
+'     - written directly to a worksheet range
+'     - consumed by helper modules
+'     - post-processed by calling code
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Variant
+'     Two-dimensional 1-based array including a header row
+'
+' BEHAVIOR
+'   - Returns a 2D array with one header row
+'   - Returns one additional row per checkpoint
+'   - Uses this column order:
+'
+'       1 = RunLabel
+'       2 = Seq
+'       3 = Checkpoint
+'       4 = Note
+'       5 = MethodID
+'       6 = MethodName
+'       7 = DeltaSeconds
+'       8 = CumulativeSeconds
+'
+'   - When no checkpoints exist, still returns a header-only 2D array
+'
+' ERROR POLICY
+'   Raises errors normally
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Arr()       As Variant      'Export array
+    Dim RowCount    As Long         'Total export rows including the header
+    Dim i           As Long         'Checkpoint loop index
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Resolve the total export row count including the header row
+        RowCount = m_CheckpointCount + 1
+    'Create the export array
+        ReDim Arr(1 To RowCount, 1 To 8)
+
+'------------------------------------------------------------------------------
+' WRITE HEADER ROW
+'------------------------------------------------------------------------------
+    'Write the report header row
+        Arr(1, 1) = "RunLabel"
+        Arr(1, 2) = "Seq"
+        Arr(1, 3) = "Checkpoint"
+        Arr(1, 4) = "Note"
+        Arr(1, 5) = "MethodID"
+        Arr(1, 6) = "MethodName"
+        Arr(1, 7) = "DeltaSeconds"
+        Arr(1, 8) = "CumulativeSeconds"
+
+'------------------------------------------------------------------------------
+' WRITE DATA ROWS
+'------------------------------------------------------------------------------
+    'Write one export row per captured checkpoint
+        For i = 1 To m_CheckpointCount
+            Arr(i + 1, 1) = m_Checkpoints(i).RunLabelText
+            Arr(i + 1, 2) = m_Checkpoints(i).Seq
+            Arr(i + 1, 3) = m_Checkpoints(i).NameText
+            Arr(i + 1, 4) = m_Checkpoints(i).NoteText
+            Arr(i + 1, 5) = m_Checkpoints(i).MethodID
+            Arr(i + 1, 6) = m_Checkpoints(i).MethodNameText
+            Arr(i + 1, 7) = m_Checkpoints(i).DeltaSecondsValue
+            Arr(i + 1, 8) = m_Checkpoints(i).ElapsedSecondsValue
+        Next i
+
+'------------------------------------------------------------------------------
+' ASSIGN RESULT
+'------------------------------------------------------------------------------
+    'Return the structured export array
+        ReportAsArray = Arr
+
+End Function
+
+Public Function ReportAsText() As String
+'
+'==============================================================================
+'                                REPORT AS TEXT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns the structured checkpoint report as a readable multiline text block
+'
+' WHY THIS EXISTS
+'   This provides a quick developer-facing report surface for:
+'
+'     - Immediate Window output
+'     - ad hoc diagnostics
+'     - lightweight reporting without worksheet output
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   String
+'     Multiline text report
+'
+' BEHAVIOR
+'   - Returns a short message when no checkpoints exist
+'   - Otherwise returns a readable multiline checkpoint report
+'
+' ERROR POLICY
+'   Raises errors normally
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim S       As String       'Accumulated report text
+    Dim i       As Long         'Checkpoint loop index
+
+'------------------------------------------------------------------------------
+' HANDLE EMPTY REPORT
+'------------------------------------------------------------------------------
+    'Return a short message when no checkpoints were captured
+        If m_CheckpointCount = 0 Then
+            ReportAsText = "No checkpoints captured."
+            Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' BUILD HEADER
+'------------------------------------------------------------------------------
+    'Start the report title
+        S = "CHECKPOINT REPORT"
+    'Append the optional run label when present
+        If Len(m_RunLabel) > 0 Then
+            S = S & " | RunLabel=" & m_RunLabel
+        End If
+    'Append the column legend line
+        S = S & vbCrLf & _
+            "Seq | Checkpoint | DeltaSeconds | CumulativeSeconds | MethodName | Note"
+
+'------------------------------------------------------------------------------
+' BUILD DATA LINES
+'------------------------------------------------------------------------------
+    'Append one readable line per checkpoint
+        For i = 1 To m_CheckpointCount
+            S = S & vbCrLf & _
+                CStr(m_Checkpoints(i).Seq) & " | " & _
+                m_Checkpoints(i).NameText & " | " & _
+                Format$(m_Checkpoints(i).DeltaSecondsValue, "0.000000000") & " | " & _
+                Format$(m_Checkpoints(i).ElapsedSecondsValue, "0.000000000") & " | " & _
+                m_Checkpoints(i).MethodNameText & " | " & _
+                m_Checkpoints(i).NoteText
+        Next i
+
+'------------------------------------------------------------------------------
+' ASSIGN RESULT
+'------------------------------------------------------------------------------
+    'Return the readable structured report text
+        ReportAsText = S
+
+End Function
 
 '
 '------------------------------------------------------------------------------
@@ -2592,7 +3135,6 @@ Private Function RolloverSeconds( _
 ' ROUTINE
 '------------------------------------------------------------------------------
     Select Case iMethod
-
         Case 2
             #If VBA7 Then
                 #If Win64 Then
@@ -2606,11 +3148,9 @@ Private Function RolloverSeconds( _
                 'Pre-VBA7: 32-bit GetTickCount wraps at 2^32 milliseconds
                     RolloverSeconds = 4294967296# / 1000#
             #End If
-
         Case 3, 4
             'timeGetTime and timeGetSystemTime behave like 32-bit millisecond counters
                 RolloverSeconds = 4294967296# / 1000#
-
         Case Else
             'All other methods either have custom correction or no rollover logic here
                 RolloverSeconds = 0#
@@ -2948,5 +3488,168 @@ Private Function QPC_Get_NextTimestampTick() As Currency
     'Return the aligned tick
         QPC_Get_NextTimestampTick = T2
         
+End Function
+
+'
+'------------------------------------------------------------------------------
+'
+'                PRIVATE: CHECKPOINT / REPORT HELPER ROUTINES
+'
+'------------------------------------------------------------------------------
+'
+
+Private Sub Checkpoint_ClearState()
+'
+'==============================================================================
+'                           CHECKPOINT CLEAR STATE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Resets the structured checkpoint state for a fresh timing session
+'
+' WHY THIS EXISTS
+'   Checkpoints and run label belong to a timing session. Starting a new session
+'   should therefore reset the structured reporting state deterministically.
+'
+'   This same helper is also used by ClearCheckpoints(), so that explicit
+'   checkpoint clearing resets the full structured report state, including the
+'   current run label.
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
+' BEHAVIOR
+'   - Clears the current run label
+'   - Clears the checkpoint count
+'   - Clears the last checkpoint marker
+'   - Reinitializes checkpoint storage to a small first capacity
+'
+' ERROR POLICY
+'   Raises errors normally
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' RESET STATE
+'------------------------------------------------------------------------------
+    'Clear the current run label
+        m_RunLabel = vbNullString
+    'Clear the checkpoint counter
+        m_CheckpointCount = 0
+    'Clear the last checkpoint elapsed-seconds marker
+        m_LastCheckpointS = 0#
+    'Reinitialize checkpoint storage with a small first capacity
+        ReDim m_Checkpoints(1 To 1)
+
+End Sub
+
+Private Sub Checkpoint_EnsureCapacity( _
+    ByVal RequiredCount As Long)
+'
+'==============================================================================
+'                        CHECKPOINT ENSURE CAPACITY
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Ensures that checkpoint storage can hold the requested number of rows
+'
+' WHY THIS EXISTS
+'   Checkpoints are appended dynamically. This helper centralizes array growth
+'   logic and avoids repeated ReDim Preserve on every single row
+'
+' INPUTS
+'   RequiredCount
+'     Minimum required checkpoint capacity
+'
+' RETURNS
+'   None
+'
+' BEHAVIOR
+'   - Leaves storage unchanged when current capacity is already sufficient
+'   - Otherwise grows storage using a simple doubling strategy
+'
+' ERROR POLICY
+'   Raises errors normally
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim CurrentCapacity     As Long                 'Current checkpoint storage capacity
+    Dim NewCapacity         As Long                 'New checkpoint storage capacity
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Resolve the current checkpoint storage capacity
+        CurrentCapacity = UBound(m_Checkpoints)
+
+'------------------------------------------------------------------------------
+' EXIT EARLY WHEN CAPACITY IS ALREADY SUFFICIENT
+'------------------------------------------------------------------------------
+    'Leave storage unchanged when the requested capacity is already available
+        If RequiredCount <= CurrentCapacity Then
+            Exit Sub
+        End If
+
+'------------------------------------------------------------------------------
+' COMPUTE NEW CAPACITY
+'------------------------------------------------------------------------------
+    'Start from a simple doubling growth rule
+        NewCapacity = CurrentCapacity * 2
+    'Ensure the new capacity is never smaller than the required count
+        If NewCapacity < RequiredCount Then
+            NewCapacity = RequiredCount
+        End If
+
+'------------------------------------------------------------------------------
+' GROW STORAGE
+'------------------------------------------------------------------------------
+    'Resize checkpoint storage while preserving existing rows
+        ReDim Preserve m_Checkpoints(1 To NewCapacity)
+
+End Sub
+
+Private Function Checkpoint_DefaultName( _
+    ByVal Seq As Long) _
+    As String
+'
+'==============================================================================
+'                         CHECKPOINT DEFAULT NAME
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns a generated fallback checkpoint name for blank checkpoint labels
+'
+' WHY THIS EXISTS
+'   Structured reports are easier to read when every checkpoint row has a
+'   non-blank label, even when the caller omitted one
+'
+' INPUTS
+'   Seq
+'     Sequence number that will be embedded in the generated label
+'
+' RETURNS
+'   String
+'     Generated checkpoint label
+'
+' ERROR POLICY
+'   Raises errors normally
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' ASSIGN RESULT
+'------------------------------------------------------------------------------
+    'Return a generated checkpoint label
+        Checkpoint_DefaultName = "Checkpoint " & CStr(Seq)
+
 End Function
 
