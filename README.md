@@ -27,6 +27,9 @@ It provides the foundation for:
 
 ---
 
+<img width="1536" height="1024" alt="cPM_Home_reduced" src="https://github.com/user-attachments/assets/c4137fcb-2886-4d38-9cb8-e3349112c258" />
+
+
 ## Overview
 
 `cPerformanceManager` is a **high-precision timing and execution-control component for Excel VBA on Windows**.
