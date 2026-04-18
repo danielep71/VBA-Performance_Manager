@@ -1,34 +1,30 @@
 # cPerformanceManager
 
-> Execution engine for performance measurement and environment control in Excel VBA
+> High-precision timing, checkpoint reporting, and Excel runtime control for VBA
 
 ---
 
 ## Part of a larger framework
 
-This module is part of the **Excel VBA Runtime Framework**:
+This component is part of the **Excel VBA Runtime Framework**.
 
-👉 https://github.com/danielep71/excel-vba-runtime-framework
-
-The framework provides a structured runtime layer for:
-
-- execution control
-- UI management
-- event-driven interaction
-
-Within that framework, `cPerformanceManager` acts as the **Execution Engine**.
+Within that framework, `cPerformanceManager` acts as the **execution and performance engine**.
 
 It provides the foundation for:
 
 - performance instrumentation
 - runtime control
 - repeatable benchmarking
+- structured checkpoint reporting
 - Excel environment optimization
+
+Framework home:
+
+[Excel VBA Runtime Framework](https://github.com/danielep71/excel-vba-runtime-framework)
 
 ---
 
 <img width="1536" height="1024" alt="cPM_Home_reduced" src="https://github.com/user-attachments/assets/c4137fcb-2886-4d38-9cb8-e3349112c258" />
-
 
 ## Overview
 
@@ -40,8 +36,10 @@ The class supports:
 
 - precise elapsed-time measurement
 - human-readable elapsed-time diagnostics
+- formatting of an already measured elapsed value without taking a second timing sample
 - benchmark-overhead estimation
-- pause/wait helpers
+- pause / wait helpers
+- structured checkpoints and reporting
 - shared Excel “time-waster” suppression
 
 Importantly, the suppression features are **not limited to timed benchmarks**.
@@ -73,7 +71,10 @@ VBA’s native timing options are often not ideal for instrumentation and benchm
 - formatting of an already measured elapsed value without taking a second timing sample
 - benchmark-overhead measurement helpers
 - timing/source diagnostics
-- pause/wait helper
+- pause / wait helper
+- structured checkpoint capture within one timing session
+- machine-readable checkpoint export
+- human-readable checkpoint reporting
 - shared Excel “time-waster” suppression for both benchmarking and general Excel/VBA performance improvement
 - strict-mode validation for safer usage
 
@@ -97,6 +98,35 @@ This is useful both for:
 
 - cleaner benchmark runs
 - faster ordinary workbook automation, even when no elapsed-time measurement is being taken
+
+---
+
+## Structured checkpoints and reporting
+
+A single elapsed-time value is often not enough.
+
+`cPerformanceManager` also supports **named checkpoints** inside a timing session so you can break a workflow into meaningful measured phases such as:
+
+- loading data
+- building arrays
+- writing formulas
+- recalculating
+- exporting results
+
+For each checkpoint the class stores:
+
+- sequence number
+- checkpoint name
+- optional note
+- delta seconds since the previous checkpoint
+- cumulative elapsed seconds since `StartTimer`
+- timing method metadata
+- optional run label
+
+The report can then be exported as:
+
+- a **2D array** through `ReportAsArray()`
+- a **readable multiline text block** through `ReportAsText()`
 
 ---
 
@@ -126,8 +156,14 @@ These files are optional but useful:
 - `examples/M_cPM_USAGE_EXAMPLES.bas`  
   Compact usage examples and recommended integration patterns
 
+- `examples/M_cPM_DEMO.bas`  
+  Interactive demo-sheet builder and runnable demo scenarios
+
+- `examples/M_DEMO_BUILDER.bas`  
+  Shared worksheet/demo layout helpers used by the demo environment
+
 - `test/M_cPM_TEST.bas`  
-  Regression test harness
+  Regression test harness covering timing, fallback, TW lifecycle, cleanup, and checkpoint/reporting behavior
 
 ---
 
@@ -144,6 +180,10 @@ Suppress unnecessary Excel overhead during intensive procedures to improve runti
 ### Controlled execution environments
 
 Run procedures under predictable application-state conditions, then restore the Excel environment cleanly.
+
+### Workflow instrumentation
+
+Capture named checkpoints and export structured delta/cumulative timing for multi-step procedures.
 
 ### General workbook performance improvement
 
@@ -189,6 +229,8 @@ Use shared “time-waster” suppression even when elapsed time is not being mea
 Optional:
 
 - import `examples/M_cPM_USAGE_EXAMPLES.bas`
+- import `examples/M_cPM_DEMO.bas`
+- import `examples/M_DEMO_BUILDER.bas`
 - import `test/M_cPM_TEST.bas`
 
 ---
@@ -244,7 +286,39 @@ Sub Example_FormatExistingElapsed()
 End Sub
 ```
 
-### 3) Improve performance without measuring elapsed time
+### 3) Structured checkpoints
+
+```vb
+Sub Example_Checkpoints()
+
+    Dim cPM As cPerformanceManager
+    Dim ReportArr As Variant
+
+    Set cPM = New cPerformanceManager
+
+    cPM.StartTimer 5, False
+    cPM.SetRunLabel "ImportWorkflow"
+
+    Range("A1:A10000").Value = 1
+    cPM.Checkpoint "LoadValues"
+
+    Range("B1:B10000").Formula = "=ROW()"
+    cPM.Checkpoint "WriteFormulas"
+
+    Application.Calculate
+    cPM.Checkpoint "Recalculate", "Full workbook calculation pass"
+
+    Debug.Print cPM.ReportAsText
+
+    ReportArr = cPM.ReportAsArray
+
+    cPM.ResetEnvironment
+    Set cPM = Nothing
+
+End Sub
+```
+
+### 4) Improve performance without measuring elapsed time
 
 ```vb
 Sub Example_PerformanceOnly()
@@ -265,7 +339,7 @@ Sub Example_PerformanceOnly()
 End Sub
 ```
 
-### 4) Benchmark with Excel TW suppression
+### 5) Benchmark with Excel TW suppression
 
 ```vb
 Sub Example_BenchmarkWithSuppression()
@@ -309,6 +383,7 @@ End Sub
 - `HasActiveSession As Boolean`
 - `MethodName(ByVal Idx As Integer) As String`
 - `StrictMode As Boolean` (Get/Let)
+- `RunLabel As String`
 
 ### Diagnostics / benchmarking
 
@@ -330,6 +405,15 @@ End Sub
 - `TW_Turn_ON()`
 - `TW_IsActive As Boolean`
 - `TW_ActiveSessionCount As Long`
+
+### Checkpoints / reporting
+
+- `SetRunLabel(ByVal RunLabel As String)`
+- `ClearCheckpoints()`
+- `Checkpoint(ByVal CheckpointName As String, Optional ByVal NoteText As String = vbNullString)`
+- `CheckpointCount As Long`
+- `ReportAsArray() As Variant`
+- `ReportAsText() As String`
 
 ---
 
@@ -359,6 +443,8 @@ cPM.TW_Turn_OFF TW_Enum.ScreenUpdating Or TW_Enum.EnableEvents
   - invalid timer method
   - `ElapsedSeconds` before `StartTimer`
   - explicit elapsed method mismatch versus active session
+  - `SetRunLabel` after checkpoint capture has already begun
+  - `Checkpoint` before `StartTimer`
 - non-strict mode attempts fallback or coercion where supported
 
 ---
@@ -369,6 +455,7 @@ cPM.TW_Turn_OFF TW_Enum.ScreenUpdating Or TW_Enum.EnableEvents
 - Use `ElapsedSeconds` for numeric logic and machine-readable results
 - Use `ElapsedTime` for user-facing display
 - When you already have a numeric elapsed value, prefer `ElapsedTime(, ElapsedSecondsIn)` to avoid taking a second timing sample
+- Use checkpoints when a workflow needs phase-level timing rather than only one final elapsed value
 - Always call `ResetEnvironment` in normal flows and in error-cleanup paths
 - “Time-waster” suppression is useful both for cleaner benchmarks and for improving performance in ordinary Excel/VBA procedures, even when no elapsed-time measurement is being taken
 
@@ -377,17 +464,29 @@ cPM.TW_Turn_OFF TW_Enum.ScreenUpdating Or TW_Enum.EnableEvents
 ## Running examples and tests
 
 - Import `examples/M_cPM_USAGE_EXAMPLES.bas` for compact usage examples
+- Import `examples/M_cPM_DEMO.bas` and `examples/M_DEMO_BUILDER.bas` for the interactive demo workbook surface
 - Import `test/M_cPM_TEST.bas` and run:
 
 ```vb
 Run_cPerformanceManager_RegressionSuite
 ```
 
+The regression suite covers:
+
+- constructor/default state
+- method mapping and fallback behavior
+- elapsed-time behavior across all timing backends
+- formatted elapsed-time behavior
+- pause methods
+- overhead helpers and diagnostics
+- TW lifecycle and cleanup
+- checkpoint/reporting behavior
+
 ---
 
 ## Position in the framework
 
-Within the **Excel VBA Runtime Framework**, `cPerformanceManager` is the component responsible for **execution performance and runtime environment control**.
+Within the **Excel VBA Runtime Framework**, `cPerformanceManager` is the component responsible for **execution performance, checkpoint instrumentation, and runtime environment control**.
 
 It is intended to work alongside complementary components for:
 
@@ -397,13 +496,15 @@ It is intended to work alongside complementary components for:
 
 Framework home:
 
-👉 https://github.com/danielep71/excel-vba-runtime-framework
+[Excel VBA Runtime Framework](https://github.com/danielep71/excel-vba-runtime-framework)
 
 ---
 
 ## Wiki
 
-Consult the github wiki for more details: https://github.com/danielep71/VBA-Performance_Manager/wiki
+For additional examples, notes, and repository-level guidance, see the project wiki:
+
+[cPerformanceManager Wiki](https://github.com/danielep71/VBA-Performance_Manager/wiki)
 
 ---
 
