@@ -1,5 +1,8 @@
 # cPerformanceManager
+
 > Execution engine for performance measurement and environment control in Excel VBA
+
+---
 
 ## Part of a larger framework
 
@@ -8,34 +11,93 @@ This module is part of the **Excel VBA Runtime Framework**:
 👉 https://github.com/danielep71/excel-vba-runtime-framework
 
 The framework provides a structured runtime layer for:
+
 - execution control
 - UI management
 - event-driven interaction
 
----
-  
-High-precision timing and performance-support utility for VBA on Windows.
+Within that framework, `cPerformanceManager` acts as the **Execution Engine**.
 
-`cPerformanceManager` provides a single, session-bound interface for multiple timing backends, numeric elapsed-time measurement, human-readable elapsed-time diagnostics, benchmark overhead measurement, pause helpers, and shared Excel “time-waster” suppression. 
-Those suppression features can be used both for cleaner benchmark runs and as a general-purpose Excel/VBA performance aid in procedures that do not measure elapsed time.
+It provides the foundation for:
+
+- performance instrumentation
+- runtime control
+- repeatable benchmarking
+- Excel environment optimization
 
 ---
 
 ## Overview
 
-VBA’s built-in timing options are often not ideal for instrumentation and benchmarking:
+`cPerformanceManager` is a **high-precision timing and execution-control component for Excel VBA on Windows**.
 
-- `Timer` has limited resolution and rolls over at midnight
-- `Now()` is wall-clock-based and is not a preferred monotonic benchmark source
-- Windows exposes better monotonic and high-resolution counters, such as `QueryPerformanceCounter`
+It wraps multiple timing backends behind a single, session-bound interface and adds a practical runtime-control layer for Excel automation.
 
-`cPerformanceManager` wraps those timing sources behind a consistent API and adds performance-oriented helpers for Excel/VBA projects.
+The class supports:
 
-The shared Excel “time-waster” suppression features are not limited to timed benchmarks. They can also be used in ordinary workbook automation to reduce overhead from screen refresh, events, alerts, calculation-mode churn, and cursor updates during heavy procedures.
+- precise elapsed-time measurement
+- human-readable elapsed-time diagnostics
+- benchmark-overhead estimation
+- pause/wait helpers
+- shared Excel “time-waster” suppression
+
+Importantly, the suppression features are **not limited to timed benchmarks**.
+
+They can also be used as a **general-purpose Excel/VBA performance aid** in procedures that do not measure elapsed time, reducing avoidable overhead from screen refresh, events, alerts, calculation-mode churn, and cursor updates during heavy operations.
+
+This makes `cPerformanceManager` more than a timer utility: it is a **runtime execution controller** for structured and performance-aware VBA solutions.
 
 ---
 
-## Repository Contents
+## Why this exists
+
+VBA’s native timing options are often not ideal for instrumentation and benchmarking:
+
+- `Timer` has limited resolution and rolls over at midnight
+- `Now()` is wall-clock based and is not a preferred monotonic benchmark source
+- Windows exposes better monotonic and high-resolution counters, such as `QueryPerformanceCounter`
+
+`cPerformanceManager` provides a consistent abstraction over those timing sources and complements them with execution and environment controls that are highly useful in real Excel/VBA projects.
+
+---
+
+## Core capabilities
+
+- multiple timing methods behind one interface
+- session-bound timing model
+- low-overhead numeric elapsed-time measurement
+- human-readable elapsed-time formatting
+- formatting of an already measured elapsed value without taking a second timing sample
+- benchmark-overhead measurement helpers
+- timing/source diagnostics
+- pause/wait helper
+- shared Excel “time-waster” suppression for both benchmarking and general Excel/VBA performance improvement
+- strict-mode validation for safer usage
+
+---
+
+## What are “time-wasters”?
+
+“Time-wasters” are Excel application behaviors that can degrade performance during execution, especially in heavy procedures or repeated loops.
+
+Typical examples include:
+
+- screen updating
+- event firing
+- display alerts
+- automatic calculation churn
+- cursor state changes
+
+`cPerformanceManager` provides centralized control over these elements so they can be suppressed during intensive procedures and restored cleanly afterward.
+
+This is useful both for:
+
+- cleaner benchmark runs
+- faster ordinary workbook automation, even when no elapsed-time measurement is being taken
+
+---
+
+## Repository contents
 
 ```text
 /README.md
@@ -58,29 +120,35 @@ These two files are required for normal use:
 
 These files are optional but useful:
 
-- `examples/M_cPM_USAGE_EXAMPLES.bas`
-  - compact usage examples and recommended integration patterns
-- `test/M_cPM_TEST.bas`
-  - regression test harness
+- `examples/M_cPM_USAGE_EXAMPLES.bas`  
+  Compact usage examples and recommended integration patterns
+
+- `test/M_cPM_TEST.bas`  
+  Regression test harness
 
 ---
 
-## Features
+## Typical use cases
 
-- Multiple timing methods under one interface
-- Session-bound timing model
-- Low-overhead numeric elapsed-time measurement
-- Human-readable elapsed-time formatting (`ElapsedTime`)
-- Formatting of an already measured elapsed-seconds value without taking a second timing sample
-- Benchmark overhead measurement helpers
-- Timing/source diagnostics
-- Pause/wait helper (`Pause`)
-- Shared Excel “time-waster” suppression (`TW_Turn_OFF` / `TW_Turn_ON`) for both benchmarking and general Excel/VBA performance improvement
-- Strict-mode validation for safer usage
+### Performance benchmarking
+
+Measure execution time with high precision using a consistent API and a preferred high-resolution backend.
+
+### Large dataset processing
+
+Suppress unnecessary Excel overhead during intensive procedures to improve runtime performance.
+
+### Controlled execution environments
+
+Run procedures under predictable application-state conditions, then restore the Excel environment cleanly.
+
+### General workbook performance improvement
+
+Use shared “time-waster” suppression even when elapsed time is not being measured.
 
 ---
 
-## Timer Methods
+## Timer methods
 
 | ID | Method | Notes |
 |---:|---|---|
@@ -97,8 +165,8 @@ These files are optional but useful:
 
 - Microsoft Excel with VBA enabled
 - Windows host environment for API-backed timing methods (`2..5`)
-- `VBA7` / `Win64` conditional-compilation support as required by the host
-- Required source files:
+- `VBA7` / `Win64` conditional compilation support as required by the host
+- required source files:
   - `cPerformanceManager.cls`
   - `M_cPM_TIMEWASTERS.bas`
 
@@ -106,20 +174,23 @@ These files are optional but useful:
 
 ## Installation
 
-1. Open the target workbook/add-in/VBA project.
-2. Open the VBA Editor (`ALT + F11`).
+1. Open the target workbook, add-in, or VBA project
+2. Open the VBA Editor (`ALT + F11`)
 3. Import:
    - `src/cPerformanceManager.cls`
    - `src/M_cPM_TIMEWASTERS.bas`
-4. Save as macro-enabled (`.xlsm` / `.xlam`).
-5. Compile (`Debug` → `Compile VBAProject`).
-6. Run a smoke test.
+4. Save as macro-enabled (`.xlsm` or `.xlam`)
+5. Compile the project (`Debug` → `Compile VBAProject`)
+6. Run a smoke test
 
-Optional: also import `examples/M_cPM_USAGE_EXAMPLES.bas` and `test/M_cPM_TEST.bas`.
+Optional:
+
+- import `examples/M_cPM_USAGE_EXAMPLES.bas`
+- import `test/M_cPM_TEST.bas`
 
 ---
 
-## Quick Start
+## Quick start
 
 ### 1) Basic timing (default QPC backend)
 
@@ -218,7 +289,7 @@ End Sub
 
 ---
 
-## Core Public API (class)
+## Core public API
 
 ### Timing
 
@@ -226,7 +297,7 @@ End Sub
 - `ElapsedSeconds(Optional iMethod As Integer = 0) As Double`
 - `ElapsedTime(Optional iMethod As Integer = 0, Optional ElapsedSecondsIn As Variant) As String`
 
-### Session/state inspection
+### Session / state inspection
 
 - `T1 As Double`
 - `T2 As Double`
@@ -259,7 +330,7 @@ End Sub
 
 ---
 
-## TW_Enum flags
+## `TW_Enum` flags
 
 Use with `TW_Turn_OFF Except:=...` as bitmask flags:
 
@@ -278,32 +349,52 @@ cPM.TW_Turn_OFF TW_Enum.ScreenUpdating Or TW_Enum.EnableEvents
 
 ---
 
-## Strict Mode Behavior
+## Strict mode behavior
 
-- Default: `StrictMode = True`
-- Strict mode raises on:
+- default: `StrictMode = True`
+- strict mode raises on:
   - invalid timer method
   - `ElapsedSeconds` before `StartTimer`
-  - explicit elapsed method mismatch vs active session
-- Non-strict mode attempts fallback/coercion where supported
+  - explicit elapsed method mismatch versus active session
+- non-strict mode attempts fallback or coercion where supported
 
 ---
 
-## Notes
+## Design notes
 
-- Prefer method `5` (QPC) for benchmark-grade timing.
-- Use `ElapsedSeconds` for numeric logic; use `ElapsedTime` for display.
-- When you already have a numeric elapsed value, prefer `ElapsedTime(, ElapsedSecondsIn)` to avoid a second timing sample.
-- Always call `ResetEnvironment` in normal flows (and in error cleanup paths).
-- TW suppression is useful both for cleaner benchmark runs and for improving performance in ordinary Excel/VBA procedures, even when no elapsed-time measurement is being taken.
+- Prefer method `5` (`QueryPerformanceCounter`) for benchmark-grade timing
+- Use `ElapsedSeconds` for numeric logic and machine-readable results
+- Use `ElapsedTime` for user-facing display
+- When you already have a numeric elapsed value, prefer `ElapsedTime(, ElapsedSecondsIn)` to avoid taking a second timing sample
+- Always call `ResetEnvironment` in normal flows and in error-cleanup paths
+- “Time-waster” suppression is useful both for cleaner benchmarks and for improving performance in ordinary Excel/VBA procedures, even when no elapsed-time measurement is being taken
 
 ---
 
-## Running Examples / Tests
+## Running examples and tests
 
-- Import `examples/M_cPM_USAGE_EXAMPLES.bas` for compact usage examples.
+- Import `examples/M_cPM_USAGE_EXAMPLES.bas` for compact usage examples
 - Import `test/M_cPM_TEST.bas` and run:
-  - `Run_cPerformanceManager_RegressionSuite`
+
+```vb
+Run_cPerformanceManager_RegressionSuite
+```
+
+---
+
+## Position in the framework
+
+Within the **Excel VBA Runtime Framework**, `cPerformanceManager` is the component responsible for **execution performance and runtime environment control**.
+
+It is intended to work alongside complementary components for:
+
+- UI management
+- event-driven interaction
+- broader Excel application architecture
+
+Framework home:
+
+👉 https://github.com/danielep71/excel-vba-runtime-framework
 
 ---
 
