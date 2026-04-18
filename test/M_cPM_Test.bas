@@ -53,7 +53,7 @@ Option Explicit     'Force explicit declaration of all variables
 '       * OverheadMeasurement_Text supports an optional Iterations argument
 '
 ' VERSION
-'   1.0.3
+'   1.0.0
 '
 ' UPDATED
 '   2026-04-15
