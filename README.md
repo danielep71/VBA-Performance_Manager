@@ -1,6 +1,6 @@
 # cPerformanceManager
+> Execution engine for performance measurement and environment control in Excel VBA
 
----
 ## Part of a larger framework
 
 This module is part of the **Excel VBA Runtime Framework**:
@@ -16,7 +16,8 @@ The framework provides a structured runtime layer for:
   
 High-precision timing and performance-support utility for VBA on Windows.
 
-`cPerformanceManager` provides a single, session-bound interface for multiple timing backends, numeric elapsed-time measurement, human-readable elapsed-time diagnostics, benchmark overhead measurement, pause helpers, and shared Excel “time-waster” suppression. Those suppression features can be used both for cleaner benchmark runs and as a general-purpose Excel/VBA performance aid in procedures that do not measure elapsed time.
+`cPerformanceManager` provides a single, session-bound interface for multiple timing backends, numeric elapsed-time measurement, human-readable elapsed-time diagnostics, benchmark overhead measurement, pause helpers, and shared Excel “time-waster” suppression. 
+Those suppression features can be used both for cleaner benchmark runs and as a general-purpose Excel/VBA performance aid in procedures that do not measure elapsed time.
 
 ---
 
