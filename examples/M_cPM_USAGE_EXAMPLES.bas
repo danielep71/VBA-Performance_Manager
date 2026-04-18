@@ -17,6 +17,7 @@ Attribute VB_Name = "M_cPM_USAGE_EXAMPLES"
 '     - how non-strict mode behaves on the same invalid usage
 '     - how to benchmark with shared TW suppression
 '     - how to structure real-world cleanup safely
+'     - how to capture and export structured checkpoints
 '
 '   This module therefore keeps only the examples that still add real teaching
 '   value beyond the demo sheets and tests
@@ -31,14 +32,14 @@ Attribute VB_Name = "M_cPM_USAGE_EXAMPLES"
 '   - Public launcher procedures run curated example groups
 '   - Individual public procedures demonstrate one meaningful usage pattern
 '   - Output is written primarily to the Immediate Window
+'   - The checkpoint example can also write a structured report to a worksheet
 '
 ' ERROR POLICY
-'   Individual examples use local cleanup and raise errors normally unless the
+'   Individual examples use local cleanup and re-raise normally unless the
 '   example intentionally demonstrates expected invalid usage
 '
 ' DEPENDENCIES
 '   - cPerformanceManager
-'   - M_cPM_TimeWasters
 '   - Excel Application object model
 '
 ' NOTES
@@ -48,7 +49,7 @@ Attribute VB_Name = "M_cPM_USAGE_EXAMPLES"
 '   - Run worksheet-writing examples from a safe workbook / worksheet
 '
 ' UPDATED
-'   2026-04-17
+'   2026-04-18
 '
 ' AUTHOR
 '   Daniele Penza
@@ -58,6 +59,12 @@ Attribute VB_Name = "M_cPM_USAGE_EXAMPLES"
 ' MODULE SETTINGS
 '------------------------------------------------------------------------------
     Option Explicit     'Force explicit declaration of all variables
+
+'------------------------------------------------------------------------------
+' PRIVATE CONSTANTS
+'------------------------------------------------------------------------------
+    Private Const cPM_USAGE_SHEET_DATA           As String = "DATA_cPM"
+    Private Const cPM_USAGE_CHECKPOINT_TOPLEFT   As String = "D3"
 
 '
 '==============================================================================
@@ -97,12 +104,13 @@ Public Sub Run_All_UsageExamples()
 '   - Run_ValidationUsageExamples
 '   - Run_TimeWasterUsageExamples
 '   - Run_SafePatternUsageExamples
+'   - Run_CheckpointUsageExamples
 '
 ' NOTES
 '   This is the best launcher when you want the full compact walkthrough
 '
 ' UPDATED
-'   2026-04-17
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -122,6 +130,8 @@ Public Sub Run_All_UsageExamples()
         Run_TimeWasterUsageExamples
     'Run the structured safe-pattern example
         Run_SafePatternUsageExamples
+    'Run the checkpoint/report example
+        Run_CheckpointUsageExamples
 
 '------------------------------------------------------------------------------
 ' PRINT MODULE END BANNER
@@ -162,7 +172,7 @@ Public Sub Run_CoreUsageExamples()
 '   - Example_ElapsedTime_FromMeasuredSeconds
 '
 ' UPDATED
-'   2026-04-17
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -215,7 +225,7 @@ Public Sub Run_ValidationUsageExamples()
 '   - Example_NonStrictMode
 '
 ' UPDATED
-'   2026-04-17
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -265,7 +275,7 @@ Public Sub Run_TimeWasterUsageExamples()
 '   - Example_TimeWasters_Basic
 '
 ' UPDATED
-'   2026-04-17
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -312,7 +322,7 @@ Public Sub Run_SafePatternUsageExamples()
 '   - Example_SafePattern
 '
 ' UPDATED
-'   2026-04-17
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -327,6 +337,53 @@ Public Sub Run_SafePatternUsageExamples()
     'Run the structured cleanup pattern example
         PrintExampleBanner "Example_SafePattern"
         Example_SafePattern
+
+End Sub
+
+Public Sub Run_CheckpointUsageExamples()
+'
+'==============================================================================
+'                     RUN CHECKPOINT USAGE EXAMPLES
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Executes the structured checkpoint/reporting example
+'
+' WHY THIS EXISTS
+'   Checkpoints are one of the newer high-value surfaces of the class and
+'   deserve an explicit standalone example
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
+' BEHAVIOR
+'   Runs:
+'     - Example_CheckpointReport
+'
+' ERROR POLICY
+'   Raises errors normally unless a called example handles errors internally
+'
+' DEPENDENCIES
+'   - Example_CheckpointReport
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' PRINT SECTION BANNER
+'------------------------------------------------------------------------------
+    'Print the group banner
+        PrintSectionBanner "CHECKPOINT USAGE EXAMPLES"
+
+'------------------------------------------------------------------------------
+' RUN EXAMPLES
+'------------------------------------------------------------------------------
+    'Run the checkpoint/report example
+        PrintExampleBanner "Example_CheckpointReport"
+        Example_CheckpointReport
 
 End Sub
 
@@ -363,7 +420,7 @@ Private Sub PrintModuleBanner( _
 '   Raises errors normally
 '
 ' UPDATED
-'   2026-04-17
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -407,7 +464,7 @@ Private Sub PrintSectionBanner( _
 '   Raises errors normally
 '
 ' UPDATED
-'   2026-04-17
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -451,7 +508,7 @@ Private Sub PrintExampleBanner( _
 '   Raises errors normally
 '
 ' UPDATED
-'   2026-04-17
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -462,6 +519,39 @@ Private Sub PrintExampleBanner( _
 
 End Sub
 
+Private Function cPM_Usage_GetDataSheet() As Worksheet
+'
+'==============================================================================
+'                           GET DATA SHEET
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Resolves the standard DATA_cPM worksheet used by the usage examples
+'
+' WHY THIS EXISTS
+'   Centralizes the workbook-qualified worksheet lookup used by several
+'   examples and avoids repeated unqualified Worksheets(...) calls
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Worksheet
+'     DATA_cPM worksheet from ThisWorkbook
+'
+' ERROR POLICY
+'   Raises errors normally if the expected worksheet is missing
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' ASSIGN RESULT
+'------------------------------------------------------------------------------
+    'Return the standard data sheet from the host workbook
+        Set cPM_Usage_GetDataSheet = ThisWorkbook.Worksheets(cPM_USAGE_SHEET_DATA)
+
+End Function
 
 '
 '==============================================================================
@@ -511,7 +601,7 @@ Public Sub Example_BasicTiming_DefaultQPC()
 '   This is the preferred example to show the normal benchmark path
 '
 ' UPDATED
-'   2026-04-17
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -521,13 +611,17 @@ Public Sub Example_BasicTiming_DefaultQPC()
     Dim WS                  As Worksheet              'Target worksheet
     Dim ElapsedS            As Double                 'Elapsed time in seconds
 
+    Dim SavedErrNumber      As Long                   'Captured error number
+    Dim SavedErrSource      As String                 'Captured error source
+    Dim SavedErrDescription As String                 'Captured error description
+
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Enable structured cleanup on failure
         On Error GoTo CleanFail
     'Resolve the target worksheet
-        Set WS = Worksheets("DATA_cPM")
+        Set WS = cPM_Usage_GetDataSheet()
     'Create a new timing manager instance
         Set cPM = New cPerformanceManager
 
@@ -557,8 +651,14 @@ CleanExit:
 '------------------------------------------------------------------------------
     'Release any environment changes made by this instance
         If Not cPM Is Nothing Then
+            On Error Resume Next
             cPM.ResetEnvironment
             Set cPM = Nothing
+            On Error GoTo 0
+        End If
+    'Re-raise the original error after cleanup when needed
+        If SavedErrNumber <> 0 Then
+            Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
         End If
 
     Exit Sub
@@ -567,6 +667,10 @@ CleanFail:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
+    'Capture the original error details before cleanup
+        SavedErrNumber = Err.Number
+        SavedErrSource = Err.Source
+        SavedErrDescription = Err.Description
     'Route through centralized cleanup
         Resume CleanExit
 
@@ -617,7 +721,7 @@ Public Sub Example_ElapsedTime_FromMeasuredSeconds()
 '   display-oriented output without double measurement
 '
 ' UPDATED
-'   2026-04-17
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -626,6 +730,10 @@ Public Sub Example_ElapsedTime_FromMeasuredSeconds()
     Dim cPM                 As cPerformanceManager    'Performance manager instance
     Dim ElapsedS            As Double                 'Elapsed time in seconds
     Dim ElapsedT            As String                 'Formatted elapsed time
+
+    Dim SavedErrNumber      As Long                   'Captured error number
+    Dim SavedErrSource      As String                 'Captured error source
+    Dim SavedErrDescription As String                 'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -665,8 +773,14 @@ CleanExit:
 '------------------------------------------------------------------------------
     'Release any environment changes made by this instance
         If Not cPM Is Nothing Then
+            On Error Resume Next
             cPM.ResetEnvironment
             Set cPM = Nothing
+            On Error GoTo 0
+        End If
+    'Re-raise the original error after cleanup when needed
+        If SavedErrNumber <> 0 Then
+            Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
         End If
 
     Exit Sub
@@ -675,6 +789,10 @@ CleanFail:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
+    'Capture the original error details before cleanup
+        SavedErrNumber = Err.Number
+        SavedErrSource = Err.Source
+        SavedErrDescription = Err.Description
     'Route through centralized cleanup
         Resume CleanExit
 
@@ -726,7 +844,7 @@ Public Sub Example_StrictMode()
 '   This example is intentionally invalid by design
 '
 ' UPDATED
-'   2026-04-17
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -736,6 +854,10 @@ Public Sub Example_StrictMode()
     Dim Dummy               As Double                 'Throwaway target for the failing call
     Dim ExpectedErrNum      As Long                   'Captured expected error number
     Dim ExpectedErrDesc     As String                 'Captured expected error description
+
+    Dim SavedErrNumber      As Long                   'Captured unexpected error number
+    Dim SavedErrSource      As String                 'Captured unexpected error source
+    Dim SavedErrDescription As String                 'Captured unexpected error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -782,8 +904,14 @@ CleanExit:
 '------------------------------------------------------------------------------
     'Release any environment changes made by this instance
         If Not cPM Is Nothing Then
+            On Error Resume Next
             cPM.ResetEnvironment
             Set cPM = Nothing
+            On Error GoTo 0
+        End If
+    'Re-raise the original unexpected error after cleanup when needed
+        If SavedErrNumber <> 0 Then
+            Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
         End If
 
     Exit Sub
@@ -792,6 +920,10 @@ CleanFail:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
+    'Capture the original unexpected error details before cleanup
+        SavedErrNumber = Err.Number
+        SavedErrSource = Err.Source
+        SavedErrDescription = Err.Description
     'Route through centralized cleanup
         Resume CleanExit
 
@@ -836,7 +968,7 @@ Public Sub Example_NonStrictMode()
 '   This example contrasts directly with Example_StrictMode
 '
 ' UPDATED
-'   2026-04-17
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -844,6 +976,10 @@ Public Sub Example_NonStrictMode()
 '------------------------------------------------------------------------------
     Dim cPM                 As cPerformanceManager    'Performance manager instance
     Dim ElapsedS            As Double                 'Elapsed time returned after fallback
+
+    Dim SavedErrNumber      As Long                   'Captured error number
+    Dim SavedErrSource      As String                 'Captured error source
+    Dim SavedErrDescription As String                 'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -885,8 +1021,14 @@ CleanExit:
 '------------------------------------------------------------------------------
     'Release any environment changes made by this instance
         If Not cPM Is Nothing Then
+            On Error Resume Next
             cPM.ResetEnvironment
             Set cPM = Nothing
+            On Error GoTo 0
+        End If
+    'Re-raise the original error after cleanup when needed
+        If SavedErrNumber <> 0 Then
+            Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
         End If
 
     Exit Sub
@@ -895,6 +1037,10 @@ CleanFail:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
+    'Capture the original error details before cleanup
+        SavedErrNumber = Err.Number
+        SavedErrSource = Err.Source
+        SavedErrDescription = Err.Description
     'Route through centralized cleanup
         Resume CleanExit
 
@@ -948,7 +1094,7 @@ Public Sub Example_TimeWasters_Basic()
 '   manager model rather than direct instance-local restoration
 '
 ' UPDATED
-'   2026-04-17
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -958,13 +1104,17 @@ Public Sub Example_TimeWasters_Basic()
     Dim WS                  As Worksheet              'Target worksheet
     Dim ElapsedS            As Double                 'Measured elapsed seconds
 
+    Dim SavedErrNumber      As Long                   'Captured error number
+    Dim SavedErrSource      As String                 'Captured error source
+    Dim SavedErrDescription As String                 'Captured error description
+
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Enable structured cleanup on failure
         On Error GoTo CleanFail
     'Resolve the target worksheet
-        Set WS = Worksheets("DATA_cPM")
+        Set WS = cPM_Usage_GetDataSheet()
     'Create a new timing manager instance
         Set cPM = New cPerformanceManager
 
@@ -1000,8 +1150,14 @@ CleanExit:
 '------------------------------------------------------------------------------
     'Release any environment changes made by this instance
         If Not cPM Is Nothing Then
+            On Error Resume Next
             cPM.ResetEnvironment
             Set cPM = Nothing
+            On Error GoTo 0
+        End If
+    'Re-raise the original error after cleanup when needed
+        If SavedErrNumber <> 0 Then
+            Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
         End If
 
     Exit Sub
@@ -1010,6 +1166,10 @@ CleanFail:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
+    'Capture the original error details before cleanup
+        SavedErrNumber = Err.Number
+        SavedErrSource = Err.Source
+        SavedErrDescription = Err.Description
     'Route through centralized cleanup
         Resume CleanExit
 
@@ -1063,7 +1223,7 @@ Public Sub Example_SafePattern()
 '   project code
 '
 ' UPDATED
-'   2026-04-17
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1072,17 +1232,17 @@ Public Sub Example_SafePattern()
     Dim cPM                 As cPerformanceManager    'Performance manager instance
     Dim WS                  As Worksheet              'Target worksheet
 
-'------------------------------------------------------------------------------
-' INITIALIZE ERROR HANDLING
-'------------------------------------------------------------------------------
-    'Route runtime failures to the cleanup-aware failure block
-        On Error GoTo CleanFail
+    Dim SavedErrNumber      As Long                   'Captured error number
+    Dim SavedErrSource      As String                 'Captured error source
+    Dim SavedErrDescription As String                 'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
+    'Route runtime failures to the cleanup-aware failure block
+        On Error GoTo CleanFail
     'Resolve the target worksheet
-        Set WS = Worksheets("DATA_cPM")
+        Set WS = cPM_Usage_GetDataSheet()
     'Create a new timing manager instance
         Set cPM = New cPerformanceManager
 
@@ -1112,8 +1272,14 @@ CleanExit:
 '------------------------------------------------------------------------------
     'Release environment changes and the instance if the object exists
         If Not cPM Is Nothing Then
+            On Error Resume Next
             cPM.ResetEnvironment
             Set cPM = Nothing
+            On Error GoTo 0
+        End If
+    'Re-raise the original error after cleanup when needed
+        If SavedErrNumber <> 0 Then
+            Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
         End If
     'Exit normally after cleanup
         Exit Sub
@@ -1122,9 +1288,148 @@ CleanFail:
 '------------------------------------------------------------------------------
 ' FAILURE EXIT
 '------------------------------------------------------------------------------
+    'Capture the original error details before cleanup
+        SavedErrNumber = Err.Number
+        SavedErrSource = Err.Source
+        SavedErrDescription = Err.Description
     'Print the error information for diagnostics
-        Debug.Print "Error " & Err.Number & " - " & Err.Description
+        Debug.Print "Error " & SavedErrNumber & " - " & SavedErrDescription
     'Always route through the normal cleanup block
+        Resume CleanExit
+
+End Sub
+
+Public Sub Example_CheckpointReport()
+'
+'==============================================================================
+'                       EXAMPLE: CHECKPOINT REPORT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Demonstrates structured checkpoint capture and export
+'
+' WHY THIS EXISTS
+'   Checkpoints are useful when one elapsed value is not enough and the caller
+'   wants structured sub-measurements such as load / write / recalculate
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
+' BEHAVIOR
+'   - Creates a fresh performance manager instance
+'   - Assigns a run label
+'   - Starts a fresh QPC timing session
+'   - Runs three simple benchmark phases
+'   - Captures a checkpoint after each phase
+'   - Prints the text report to the Immediate Window
+'   - Writes the array report to DATA_cPM starting at D3
+'
+' ERROR POLICY
+'   Restores the class environment before re-raising unexpected errors
+'
+' DEPENDENCIES
+'   - cPerformanceManager
+'   - Debug.Print
+'   - ReportAsText
+'   - ReportAsArray
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim cPM                 As cPerformanceManager    'Performance manager instance
+    Dim WS                  As Worksheet              'Target worksheet
+    Dim ReportArr           As Variant                'Structured report array
+    Dim TopLeft             As Range                  'Top-left output anchor
+
+    Dim SavedErrNumber      As Long                   'Captured error number
+    Dim SavedErrSource      As String                 'Captured error source
+    Dim SavedErrDescription As String                 'Captured error description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable structured cleanup on failure
+        On Error GoTo CleanFail
+    'Resolve the target worksheet
+        Set WS = cPM_Usage_GetDataSheet()
+    'Resolve the top-left report output anchor
+        Set TopLeft = WS.Range(cPM_USAGE_CHECKPOINT_TOPLEFT)
+    'Create a fresh performance manager instance
+        Set cPM = New cPerformanceManager
+
+'------------------------------------------------------------------------------
+' INITIALIZE TIMING SESSION
+'------------------------------------------------------------------------------
+    'Assign a run label
+        cPM.SetRunLabel "ImportWorkflow"
+    'Start a fresh timing session
+        cPM.StartTimer 5, False
+
+'------------------------------------------------------------------------------
+' CHECKPOINTED WORKLOAD
+'------------------------------------------------------------------------------
+    'Simulate phase 1
+        WS.Range("A1:A10000").Value = 1
+    'Capture the first checkpoint
+        cPM.Checkpoint "LoadValues"
+    'Simulate phase 2
+        WS.Range("B1:B10000").Formula = "=ROW()"
+    'Capture the second checkpoint
+        cPM.Checkpoint "WriteFormulas"
+    'Simulate phase 3
+        Application.Calculate
+    'Capture the third checkpoint
+        cPM.Checkpoint "Recalculate", "Full workbook calculation pass"
+
+'------------------------------------------------------------------------------
+' OUTPUT TO IMMEDIATE WINDOW
+'------------------------------------------------------------------------------
+    'Print the readable checkpoint report
+        Debug.Print cPM.ReportAsText
+
+'------------------------------------------------------------------------------
+' OUTPUT TO WORKSHEET
+'------------------------------------------------------------------------------
+    'Resolve the structured report array
+        ReportArr = cPM.ReportAsArray
+    'Clear the target write area sized to the current report
+        TopLeft.Resize(UBound(ReportArr, 1), UBound(ReportArr, 2)).ClearContents
+    'Write the structured report array to the worksheet
+        TopLeft.Resize(UBound(ReportArr, 1), UBound(ReportArr, 2)).Value = ReportArr
+
+CleanExit:
+'------------------------------------------------------------------------------
+' CLEANUP
+'------------------------------------------------------------------------------
+    'Release environment changes
+        If Not cPM Is Nothing Then
+            On Error Resume Next
+            cPM.ResetEnvironment
+            Set cPM = Nothing
+            On Error GoTo 0
+        End If
+    'Re-raise the original error after cleanup when needed
+        If SavedErrNumber <> 0 Then
+            Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
+        End If
+
+    Exit Sub
+
+CleanFail:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+    'Capture the original error details before cleanup
+        SavedErrNumber = Err.Number
+        SavedErrSource = Err.Source
+        SavedErrDescription = Err.Description
+    'Route through centralized cleanup
         Resume CleanExit
 
 End Sub
