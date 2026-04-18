@@ -132,7 +132,6 @@ Public Sub cPM_CreateDemoSheets()
 '   - Delegates generic sheet preparation to DEMO_Build_DemoTemplate
 '   - Resolves the prepared worksheets from ThisWorkbook
 '   - Builds the sheet-specific content for DEMO_cPM, DATA_cPM, and HELP_cPM
-'   - Hides page-break indicators on the rebuilt sheets on a best-effort basis
 '   - Activates the main demo sheet at the end
 '
 ' ERROR POLICY
@@ -150,8 +149,11 @@ Public Sub cPM_CreateDemoSheets()
 '   Generic worksheet lifecycle concerns such as create / get / reset are
 '   delegated to DEMO_Build_DemoTemplate and are therefore not repeated here
 '
+'   This routine rebuilds the three demo sheets and then activates DEMO_cPM
+'   as the user-facing landing sheet
+'
 ' UPDATED
-'   2026-04-15
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -161,10 +163,10 @@ Public Sub cPM_CreateDemoSheets()
     Dim WS_Demo             As Worksheet            'Demo / control sheet
     Dim WS_Data             As Worksheet            'Data / benchmark sheet
     Dim WS_Help             As Worksheet            'Embedded help sheet
-    
+
     Dim FastModeState       As tDemoFastModeState   'Saved Application-state snapshot
     Dim FastModeOn          As Boolean              'TRUE when fast mode was entered
-    
+
     Dim SavedErrNumber      As Long                 'Captured error number
     Dim SavedErrSource      As String               'Captured error source
     Dim SavedErrDescription As String               'Captured error description
@@ -221,16 +223,6 @@ Public Sub cPM_CreateDemoSheets()
     'Build the embedded help / documentation sheet content
         cPM_BuildHelpSheet WS_Help
 
-'------------------------------------------------------------------------------
-' ACTIVATE MAIN DEMO SHEET
-'------------------------------------------------------------------------------
-    'Bring the main demo sheet to the foreground for the user
-        WS_Demo.Activate
-        WS_Demo.Range("E5").Formula2Local = "=XLOOKUP(cPM_MethodID;VALUE(LEFT(HELP_cPM!D16:D21;1));RIGHT(HELP_cPM!D16:D21;LEN(HELP_cPM!D16:D21)-4))"
-        WS_Demo.Range("E9").Formula2Local = "=XLOOKUP(cPM_PauseMethod;VALUE(LEFT(HELP_cPM!D24:D27;1));RIGHT(HELP_cPM!D24:D27;LEN(HELP_cPM!D24:D27)-4))"
-    'Park the selection at the top-left anchor cell
-        WS_Demo.Range("A1").Select
-
 Clean_Exit:
 '------------------------------------------------------------------------------
 ' CLEANUP
@@ -245,7 +237,7 @@ Clean_Exit:
         If SavedErrNumber <> 0 Then
             Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
         End If
-    
+
     Exit Sub
 
 Clean_Fail:
@@ -389,7 +381,7 @@ Private Sub cPM_BuildDemoSheet( _
             DEMO_Write_NamedInputRow _
                 WB, WS, _
                 WS.Range("C10"), WS.Range("D10"), _
-                "Iterations", 200, _
+                "Iterations", 100, _
                 cPM_NAME_ITER, _
                 DemoInputValidationNumeric, _
                 "", _
@@ -473,9 +465,9 @@ Private Sub cPM_BuildDemoSheet( _
     '--------------------------------------------------------------------------
     ' CREATE REGRESSION TEST BUTTON
     '--------------------------------------------------------------------------
-            DEMO_Add_DemoButton WS, "Btn_cPM_Regression", "Run Regression Tests", _
-                Range("I8").Left, Range("I8").Top + 10, _
-                135, 25, "Run_cPerformanceManager_RegressionSuite"
+        DEMO_Add_DemoButton WS, "Btn_cPM_Regression", "Run Regression Tests", _
+            WS.Range("I8").Left, WS.Range("I8").Top + 10, _
+            135, 25, "Run_cPerformanceManager_RegressionSuite"
     
 '------------------------------------------------------------------------------
 ' BUILD RESULTS LOG
@@ -512,13 +504,10 @@ Private Sub cPM_BuildDemoSheet( _
 
         'Format the run identifier column as an integer
             Lo.ListColumns("Run ID").DataBodyRange.NumberFormat = "0"
-
         'Format the timestamp column as date + time
             Lo.ListColumns("Timestamp").DataBodyRange.NumberFormat = "yyyy-mm-dd hh:mm:ss"
-
         'Format the method identifier column as an integer
             Lo.ListColumns("Method ID").DataBodyRange.NumberFormat = "0"
-
         'Format elapsed / timer metrics with higher precision
             Lo.ListColumns("Elapsed Seconds").DataBodyRange.NumberFormat = "0.000000"
             Lo.ListColumns("T1").DataBodyRange.NumberFormat = "0.000000"
@@ -848,7 +837,8 @@ Public Sub cPM_RunBasicTiming()
 '   - Appends one log row
 '
 ' ERROR POLICY
-'   Restores the cPerformanceManager environment before re-raising errors
+'   Restores the cPerformanceManager environment before re-raising the
+'   original error
 '
 ' DEPENDENCIES
 '   - Btn_Click
@@ -861,7 +851,7 @@ Public Sub cPM_RunBasicTiming()
 '   - cPM_Demo_AppendLog
 '
 ' UPDATED
-'   2026-04-15
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -873,10 +863,15 @@ Public Sub cPM_RunBasicTiming()
     Dim Target              As Range                 'Worksheet target range
     Dim FillValue           As Variant               'Configured fill value
     Dim Iterations          As Long                  'Configured iteration count
+    Dim TWMode              As String                'Selected TW mode
     Dim i                   As Long                  'Loop counter
     Dim ElapsedS            As Double                'Measured elapsed seconds
     Dim ElapsedTxt          As String                'Formatted elapsed-time text
     Dim Notes               As String                'Scenario note text
+
+    Dim SavedErrNumber      As Long                  'Captured error number
+    Dim SavedErrSource      As String                'Captured error source
+    Dim SavedErrDescription As String                'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -889,6 +884,8 @@ Public Sub cPM_RunBasicTiming()
         MethodID = cPM_Demo_GetMethodID()
     'Read the selected alignment flag
         AlignFlag = cPM_Demo_GetAlignFlag()
+    'Resolve the selected TW mode once
+        TWMode = cPM_Demo_GetTWMode()
     'Prepare the timer instance from the current control-panel settings
         Set cPM = cPM_Demo_PrepareInstance()
     'Resolve the target worksheet range for the value-fill workload
@@ -902,7 +899,7 @@ Public Sub cPM_RunBasicTiming()
 ' APPLY OPTIONAL TW MODE
 '------------------------------------------------------------------------------
     'Apply the selected TW mode before the measurement starts
-        cPM_Demo_ApplyTWMode cPM, cPM_Demo_GetTWMode()
+        cPM_Demo_ApplyTWMode cPM, TWMode
 
 '------------------------------------------------------------------------------
 ' PREPARE WORKLOAD
@@ -933,7 +930,7 @@ Public Sub cPM_RunBasicTiming()
                 " | Iterations=" & CStr(Iterations) & _
                 " | Align=" & CStr(AlignFlag) & _
                 " | FillValue=" & CStr(FillValue) & _
-                " | TW=" & cPM_Demo_GetTWMode()
+                " | TW=" & TWMode
 
 '------------------------------------------------------------------------------
 ' LOG RESULT
@@ -955,8 +952,14 @@ CleanExit:
 '------------------------------------------------------------------------------
     'Release environment changes deterministically
         If Not cPM Is Nothing Then
+            On Error Resume Next
             cPM.ResetEnvironment
             Set cPM = Nothing
+            On Error GoTo 0
+        End If
+    'Re-raise the original error after cleanup when needed
+        If SavedErrNumber <> 0 Then
+            Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
         End If
 
     Exit Sub
@@ -965,19 +968,14 @@ CleanFail:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-    'Release environment changes deterministically before re-raising
-        If Not cPM Is Nothing Then
-            On Error Resume Next
-            cPM.ResetEnvironment
-            Set cPM = Nothing
-            On Error GoTo 0
-        End If
-
-    'Re-raise the original error
-        Err.Raise Err.Number, Err.Source, Err.Description
+    'Capture the original error details before cleanup
+        SavedErrNumber = Err.Number
+        SavedErrSource = Err.Source
+        SavedErrDescription = Err.Description
+    'Continue through the centralized cleanup path
+        Resume CleanExit
 
 End Sub
-
 
 Public Sub cPM_RunAllMethods()
 '
@@ -1028,6 +1026,11 @@ Public Sub cPM_RunAllMethods()
 ' DECLARE
 '------------------------------------------------------------------------------
     Dim cPM                 As cPerformanceManager   'Timer instance
+
+    Dim SavedErrNumber      As Long                  'Captured error number
+    Dim SavedErrSource      As String                'Captured error source
+    Dim SavedErrDescription As String                'Captured error description
+    
     Dim MethodID            As Integer               'Looped timing method
     Dim AlignFlag           As Boolean               'Selected alignment flag
     Dim Target              As Range                 'Worksheet target range
@@ -1043,19 +1046,14 @@ Public Sub cPM_RunAllMethods()
 '------------------------------------------------------------------------------
     'Enable structured cleanup on failure
         On Error GoTo CleanFail
-
     'Simulate a pressed button when the routine was launched by a shape
         Btn_Click
-
     'Read the selected alignment flag once
         AlignFlag = cPM_Demo_GetAlignFlag()
-
     'Resolve the target worksheet range once
         Set Target = cPM_Demo_GetValueTargetRange()
-
     'Read the configured fill value once
         FillValue = cPM_Demo_GetValueFillValue()
-
     'Read the configured iteration count once
         Iterations = cPM_Demo_GetIterations()
 
@@ -1064,40 +1062,30 @@ Public Sub cPM_RunAllMethods()
 '------------------------------------------------------------------------------
     'Loop through all documented timing backends
         For MethodID = 1 To 6
-            
+           
             'Create and configure a fresh timer instance for this method
                 Set cPM = cPM_Demo_PrepareInstance()
-
             'Apply the selected TW mode
                 cPM_Demo_ApplyTWMode cPM, cPM_Demo_GetTWMode()
-
             'Clear the target range before the timed block
                 Target.ClearContents
-
             'Start the timing session
                 cPM.StartTimer MethodID, AlignFlag
-
             'Repeat the value-fill workload for the configured number of iterations
                 For i = 1 To Iterations
-                    
                     'Run the value-fill workload
                         Target.Value = FillValue
-                
                 Next i
-
             'Read numeric elapsed time
                 ElapsedS = cPM.ElapsedSeconds()
-
             'Read formatted elapsed time without taking a second timing sample
                 ElapsedTxt = cPM.ElapsedTime(, ElapsedS)
-
             'Build the scenario note text
                 Notes = "Rows=" & CStr(Target.Rows.Count) & _
                         " | Iterations=" & CStr(Iterations) & _
                         " | Align=" & CStr(AlignFlag) & _
                         " | FillValue=" & CStr(FillValue) & _
                         " | TW=" & cPM_Demo_GetTWMode()
-
             'Append one result row for the current method
                 cPM_Demo_AppendLog "All Methods", _
                                    MethodID, _
@@ -1108,7 +1096,6 @@ Public Sub cPM_RunAllMethods()
                                    cPM.T2, _
                                    cPM.ET, _
                                    Notes
-
             'Release the current method instance cleanly before the next loop
                 cPM.ResetEnvironment
                 Set cPM = Nothing
@@ -1119,10 +1106,16 @@ CleanExit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Release any remaining environment changes
+    'Release environment changes deterministically
         If Not cPM Is Nothing Then
+            On Error Resume Next
             cPM.ResetEnvironment
             Set cPM = Nothing
+            On Error GoTo 0
+        End If
+    'Re-raise the original error after cleanup when needed
+        If SavedErrNumber <> 0 Then
+            Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
         End If
 
     Exit Sub
@@ -1131,16 +1124,12 @@ CleanFail:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-    'Release any remaining environment changes before re-raising
-        If Not cPM Is Nothing Then
-            On Error Resume Next
-            cPM.ResetEnvironment
-            Set cPM = Nothing
-            On Error GoTo 0
-        End If
-
-    'Re-raise the original error
-        Err.Raise Err.Number, Err.Source, Err.Description
+    'Capture the original error details before cleanup
+        SavedErrNumber = Err.Number
+        SavedErrSource = Err.Source
+        SavedErrDescription = Err.Description
+    'Continue through the centralized cleanup path
+        Resume CleanExit
 
 End Sub
 
@@ -1196,6 +1185,11 @@ Public Sub cPM_RunAlignedDemo()
 ' DECLARE
 '------------------------------------------------------------------------------
     Dim cPM                 As cPerformanceManager   'Timer instance
+
+    Dim SavedErrNumber      As Long                  'Captured error number
+    Dim SavedErrSource      As String                'Captured error source
+    Dim SavedErrDescription As String                'Captured error description
+    
     Dim MethodID            As Integer               'Selected timing method
     Dim Target              As Range                 'Worksheet target range
     Dim FillValue           As Variant               'Configured fill value
@@ -1209,19 +1203,14 @@ Public Sub cPM_RunAlignedDemo()
 '------------------------------------------------------------------------------
     'Enable structured cleanup on failure
         On Error GoTo CleanFail
-
     'Simulate a pressed button when the routine was launched by a shape
         Btn_Click
-
     'Read the selected timing method
         MethodID = cPM_Demo_GetMethodID()
-
     'Resolve the target worksheet range
         Set Target = cPM_Demo_GetValueTargetRange()
-
     'Read the configured fill value
         FillValue = cPM_Demo_GetValueFillValue()
-
     'Read the configured iteration count
         Iterations = cPM_Demo_GetIterations()
 
@@ -1230,28 +1219,20 @@ Public Sub cPM_RunAlignedDemo()
 '------------------------------------------------------------------------------
     'Create and configure a timer instance for the non-aligned pass
         Set cPM = cPM_Demo_PrepareInstance()
-
     'Apply the selected TW mode
         cPM_Demo_ApplyTWMode cPM, cPM_Demo_GetTWMode()
-
     'Clear the target range before the timed block
         Target.ClearContents
-
     'Start the non-aligned timing session
         cPM.StartTimer MethodID, False
-
     'Repeat the value-fill workload for the configured number of iterations
         For i = 1 To Iterations
-            
             'Run the value-fill workload
                 Target.Value = FillValue
-        
         Next i
-
     'Read the non-aligned results
         ElapsedS = cPM.ElapsedSeconds()
         ElapsedTxt = cPM.ElapsedTime(, ElapsedS)
-
     'Log the non-aligned measurement
         cPM_Demo_AppendLog "Aligned Demo", _
                            MethodID, _
@@ -1263,7 +1244,6 @@ Public Sub cPM_RunAlignedDemo()
                            cPM.ET, _
                            "Iterations=" & CStr(Iterations) & _
                            " | Align=False | FillValue=" & CStr(FillValue)
-
     'Release the first pass cleanly
         cPM.ResetEnvironment
         Set cPM = Nothing
@@ -1273,28 +1253,20 @@ Public Sub cPM_RunAlignedDemo()
 '------------------------------------------------------------------------------
     'Create and configure a timer instance for the aligned pass
         Set cPM = cPM_Demo_PrepareInstance()
-
     'Apply the selected TW mode
         cPM_Demo_ApplyTWMode cPM, cPM_Demo_GetTWMode()
-
     'Clear the target range before the timed block
         Target.ClearContents
-
     'Start the aligned timing session
         cPM.StartTimer MethodID, True
-
     'Repeat the value-fill workload for the configured number of iterations
         For i = 1 To Iterations
-            
             'Run the value-fill workload
                 Target.Value = FillValue
-        
         Next i
-
     'Read the aligned results
         ElapsedS = cPM.ElapsedSeconds()
         ElapsedTxt = cPM.ElapsedTime(, ElapsedS)
-
     'Log the aligned measurement
         cPM_Demo_AppendLog "Aligned Demo", _
                            MethodID, _
@@ -1311,10 +1283,17 @@ CleanExit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Release any remaining environment changes
+    'Release environment changes deterministically
         If Not cPM Is Nothing Then
+            On Error Resume Next
             cPM.ResetEnvironment
             Set cPM = Nothing
+            On Error GoTo 0
+        End If
+
+    'Re-raise the original error after cleanup when needed
+        If SavedErrNumber <> 0 Then
+            Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
         End If
 
     Exit Sub
@@ -1323,16 +1302,13 @@ CleanFail:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-    'Release any remaining environment changes before re-raising
-        If Not cPM Is Nothing Then
-            On Error Resume Next
-            cPM.ResetEnvironment
-            Set cPM = Nothing
-            On Error GoTo 0
-        End If
+    'Capture the original error details before cleanup
+        SavedErrNumber = Err.Number
+        SavedErrSource = Err.Source
+        SavedErrDescription = Err.Description
 
-    'Re-raise the original error
-        Err.Raise Err.Number, Err.Source, Err.Description
+    'Continue through the centralized cleanup path
+        Resume CleanExit
 
 End Sub
 
@@ -1378,15 +1354,17 @@ Public Sub cPM_RunDiagnostics()
 '------------------------------------------------------------------------------
     Dim cPM                 As cPerformanceManager   'Timer instance
 
+    Dim SavedErrNumber      As Long                  'Captured error number
+    Dim SavedErrSource      As String                'Captured error source
+    Dim SavedErrDescription As String                'Captured error description
+
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Enable structured cleanup on failure
         On Error GoTo CleanFail
-
     'Simulate a pressed button when the routine was launched by a shape
         Btn_Click
-
     'Prepare a timer instance using the current strict-mode setting
         Set cPM = cPM_Demo_PrepareInstance()
 
@@ -1396,15 +1374,12 @@ Public Sub cPM_RunDiagnostics()
     'Append the nominal system tick interval
         cPM_Demo_AppendLog "Diagnostics", 0, "", 0#, "", 0#, 0#, 0#, _
                            cPM.Get_SystemTickInterval
-
     'Append the QPC tick interval
         cPM_Demo_AppendLog "Diagnostics", 0, "", 0#, "", 0#, 0#, 0#, _
                            cPM.QPC_Get_SystemTickInterval
-
     'Append the QPC frequency text
         cPM_Demo_AppendLog "Diagnostics", 0, "", 0#, "", 0#, 0#, 0#, _
                            cPM.QPC_FrequencyPerSecond
-
     'Append the QPC frequency numeric value
         cPM_Demo_AppendLog "Diagnostics", 0, "", 0#, "", 0#, 0#, 0#, _
                            "QPC Frequency Value = " & CStr(cPM.QPC_FrequencyPerSecond_Value)
@@ -1415,8 +1390,15 @@ CleanExit:
 '------------------------------------------------------------------------------
     'Release environment changes deterministically
         If Not cPM Is Nothing Then
+            On Error Resume Next
             cPM.ResetEnvironment
             Set cPM = Nothing
+            On Error GoTo 0
+        End If
+
+    'Re-raise the original error after cleanup when needed
+        If SavedErrNumber <> 0 Then
+            Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
         End If
 
     Exit Sub
@@ -1425,16 +1407,13 @@ CleanFail:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-    'Release environment changes deterministically before re-raising
-        If Not cPM Is Nothing Then
-            On Error Resume Next
-            cPM.ResetEnvironment
-            Set cPM = Nothing
-            On Error GoTo 0
-        End If
+    'Capture the original error details before cleanup
+        SavedErrNumber = Err.Number
+        SavedErrSource = Err.Source
+        SavedErrDescription = Err.Description
 
-    'Re-raise the original error
-        Err.Raise Err.Number, Err.Source, Err.Description
+    'Continue through the centralized cleanup path
+        Resume CleanExit
 
 End Sub
 
@@ -1482,6 +1461,11 @@ Public Sub cPM_RunOverheadDemo()
 ' DECLARE
 '------------------------------------------------------------------------------
     Dim cPM                 As cPerformanceManager   'Timer instance
+
+    Dim SavedErrNumber      As Long                  'Captured error number
+    Dim SavedErrSource      As String                'Captured error source
+    Dim SavedErrDescription As String                'Captured error description
+    
     Dim MethodID            As Integer               'Selected timing method
     Dim Iterations          As Long                  'Selected iteration count
     Dim OverheadS           As Double                'Numeric overhead measurement
@@ -1492,16 +1476,12 @@ Public Sub cPM_RunOverheadDemo()
 '------------------------------------------------------------------------------
     'Enable structured cleanup on failure
         On Error GoTo CleanFail
-
     'Simulate a pressed button when the routine was launched by a shape
         Btn_Click
-
     'Read the selected timing method
         MethodID = cPM_Demo_GetMethodID()
-
     'Read the selected iteration count
         Iterations = cPM_Demo_GetIterations()
-
     'Prepare a timer instance using the current strict-mode setting
         Set cPM = cPM_Demo_PrepareInstance()
 
@@ -1534,8 +1514,15 @@ CleanExit:
 '------------------------------------------------------------------------------
     'Release environment changes deterministically
         If Not cPM Is Nothing Then
+            On Error Resume Next
             cPM.ResetEnvironment
             Set cPM = Nothing
+            On Error GoTo 0
+        End If
+
+    'Re-raise the original error after cleanup when needed
+        If SavedErrNumber <> 0 Then
+            Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
         End If
 
     Exit Sub
@@ -1544,16 +1531,13 @@ CleanFail:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-    'Release environment changes deterministically before re-raising
-        If Not cPM Is Nothing Then
-            On Error Resume Next
-            cPM.ResetEnvironment
-            Set cPM = Nothing
-            On Error GoTo 0
-        End If
+    'Capture the original error details before cleanup
+        SavedErrNumber = Err.Number
+        SavedErrSource = Err.Source
+        SavedErrDescription = Err.Description
 
-    'Re-raise the original error
-        Err.Raise Err.Number, Err.Source, Err.Description
+    'Continue through the centralized cleanup path
+        Resume CleanExit
 
 End Sub
 
@@ -1600,6 +1584,11 @@ Public Sub cPM_RunPauseDemo()
 ' DECLARE
 '------------------------------------------------------------------------------
     Dim cPM                 As cPerformanceManager   'Timer instance
+
+    Dim SavedErrNumber      As Long                  'Captured error number
+    Dim SavedErrSource      As String                'Captured error source
+    Dim SavedErrDescription As String                'Captured error description
+    
     Dim PauseS              As Double                'Requested pause seconds
     Dim PauseMethod         As Integer               'Requested pause method
     Dim ElapsedS            As Double                'Measured elapsed seconds
@@ -1637,7 +1626,6 @@ Public Sub cPM_RunPauseDemo()
 '------------------------------------------------------------------------------
     'Read numeric elapsed time
         ElapsedS = cPM.ElapsedSeconds()
-
     'Read formatted elapsed time without taking a second timing sample
         ElapsedTxt = cPM.ElapsedTime(, ElapsedS)
 
@@ -1661,8 +1649,15 @@ CleanExit:
 '------------------------------------------------------------------------------
     'Release environment changes deterministically
         If Not cPM Is Nothing Then
+            On Error Resume Next
             cPM.ResetEnvironment
             Set cPM = Nothing
+            On Error GoTo 0
+        End If
+
+    'Re-raise the original error after cleanup when needed
+        If SavedErrNumber <> 0 Then
+            Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
         End If
 
     Exit Sub
@@ -1671,16 +1666,13 @@ CleanFail:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-    'Release environment changes deterministically before re-raising
-        If Not cPM Is Nothing Then
-            On Error Resume Next
-            cPM.ResetEnvironment
-            Set cPM = Nothing
-            On Error GoTo 0
-        End If
+    'Capture the original error details before cleanup
+        SavedErrNumber = Err.Number
+        SavedErrSource = Err.Source
+        SavedErrDescription = Err.Description
 
-    'Re-raise the original error
-        Err.Raise Err.Number, Err.Source, Err.Description
+    'Continue through the centralized cleanup path
+        Resume CleanExit
 
 End Sub
 
@@ -1715,7 +1707,8 @@ Public Sub cPM_RunTWComparison()
 '   - Appends one structured log row for each pass
 '
 ' ERROR POLICY
-'   Restores the cPerformanceManager environment before re-raising errors
+'   Restores the cPerformanceManager environment before re-raising the
+'   original error
 '
 ' DEPENDENCIES
 '   - Btn_Click
@@ -1729,8 +1722,20 @@ Public Sub cPM_RunTWComparison()
 '   - cPM_Demo_ApplyTWMode
 '   - cPM_Demo_AppendLog
 '
+' NOTES
+'   The configured formula text is expected to be stored in invariant Excel /
+'   VBA formula syntax suitable for Range.Formula assignment, for example:
+'
+'     =RAND()
+'     =ROW()*2
+'     =SUM(A1:A10)
+'
+'   This routine intentionally uses Range.Formula rather than FormulaLocal
+'   and therefore does not expect localized function names or locale-specific
+'   list separators in the configured formula text
+'
 ' UPDATED
-'   2026-04-15
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1747,30 +1752,27 @@ Public Sub cPM_RunTWComparison()
     Dim ElapsedS            As Double                'Measured elapsed seconds
     Dim ElapsedTxt          As String                'Formatted elapsed text
 
+    Dim SavedErrNumber      As Long                  'Captured error number
+    Dim SavedErrSource      As String                'Captured error source
+    Dim SavedErrDescription As String                'Captured error description
+
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Enable structured cleanup on failure
         On Error GoTo CleanFail
-
     'Simulate a pressed button when the routine was launched by a shape
         Btn_Click
-
     'Read the selected timing method
         MethodID = cPM_Demo_GetMethodID()
-
     'Read the selected alignment flag
         AlignFlag = cPM_Demo_GetAlignFlag()
-
     'Read the selected TW mode
         TWMode = cPM_Demo_GetTWMode()
-
     'Resolve the target worksheet range
         Set Target = cPM_Demo_GetFormulaTargetRange()
-
     'Read the configured formula text
         FormulaText = cPM_Demo_GetFormulaFillExpr()
-
     'Read the configured iteration count
         Iterations = cPM_Demo_GetIterations()
 
@@ -1779,25 +1781,19 @@ Public Sub cPM_RunTWComparison()
 '------------------------------------------------------------------------------
     'Create and configure a timer instance for the normal pass
         Set cPM = cPM_Demo_PrepareInstance()
-
     'Clear the target range before the timed block
         Target.ClearContents
-
     'Start the normal timing session
         cPM.StartTimer MethodID, AlignFlag
-
     'Repeat the formula-fill workload for the configured number of iterations
         For i = 1 To Iterations
-            
-            'Run the formula-fill workload
+            'Apply the configured invariant formula text to the target range
                 Target.Formula = FormulaText
-        
         Next i
-
     'Read the normal-pass results
         ElapsedS = cPM.ElapsedSeconds()
+    'Read the formatted elapsed time without taking a second timing sample
         ElapsedTxt = cPM.ElapsedTime(, ElapsedS)
-
     'Append the normal-pass result row
         cPM_Demo_AppendLog "TW Comparison", _
                            MethodID, _
@@ -1812,8 +1808,7 @@ Public Sub cPM_RunTWComparison()
                            " | Align=" & CStr(AlignFlag) & _
                            " | Formula=" & FormulaText & _
                            " | TW=Normal"
-
-    'Release the normal pass cleanly
+    'Release the normal pass cleanly before starting the TW-managed pass
         cPM.ResetEnvironment
         Set cPM = Nothing
 
@@ -1822,28 +1817,21 @@ Public Sub cPM_RunTWComparison()
 '------------------------------------------------------------------------------
     'Create and configure a timer instance for the TW pass
         Set cPM = cPM_Demo_PrepareInstance()
-
     'Apply the selected TW mode
         cPM_Demo_ApplyTWMode cPM, TWMode
-
     'Clear the target range before the timed block
         Target.ClearContents
-
     'Start the TW timing session
         cPM.StartTimer MethodID, AlignFlag
-
     'Repeat the formula-fill workload for the configured number of iterations
         For i = 1 To Iterations
-            
-            'Run the formula-fill workload
+            'Apply the configured invariant formula text to the target range
                 Target.Formula = FormulaText
-        
         Next i
-
     'Read the TW-pass results
         ElapsedS = cPM.ElapsedSeconds()
+    'Read the formatted elapsed time without taking a second timing sample
         ElapsedTxt = cPM.ElapsedTime(, ElapsedS)
-
     'Append the TW-pass result row
         cPM_Demo_AppendLog "TW Comparison", _
                            MethodID, _
@@ -1865,8 +1853,14 @@ CleanExit:
 '------------------------------------------------------------------------------
     'Release any remaining environment changes
         If Not cPM Is Nothing Then
+            On Error Resume Next
             cPM.ResetEnvironment
             Set cPM = Nothing
+            On Error GoTo 0
+        End If
+    'Re-raise the original error after cleanup when needed
+        If SavedErrNumber <> 0 Then
+            Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
         End If
 
     Exit Sub
@@ -1875,18 +1869,15 @@ CleanFail:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-    'Release any remaining environment changes before re-raising
-        If Not cPM Is Nothing Then
-            On Error Resume Next
-            cPM.ResetEnvironment
-            Set cPM = Nothing
-            On Error GoTo 0
-        End If
-
-    'Re-raise the original error
-        Err.Raise Err.Number, Err.Source, Err.Description
+    'Capture the original error details before cleanup
+        SavedErrNumber = Err.Number
+        SavedErrSource = Err.Source
+        SavedErrDescription = Err.Description
+    'Continue through the centralized cleanup path
+        Resume CleanExit
 
 End Sub
+
 
 
 Public Sub cPM_ClearResultsLog()
@@ -2003,7 +1994,6 @@ Private Function cPM_Demo_PrepareInstance() As cPerformanceManager
 '------------------------------------------------------------------------------
     'Create a fresh timer instance
         Set cPM = New cPerformanceManager
-
     'Apply the selected strict-mode flag
         cPM.StrictMode = cPM_Demo_GetStrictFlag()
 
@@ -2402,29 +2392,22 @@ Private Sub cPM_Demo_ApplyTWMode( _
 ' DISPATCH
 '------------------------------------------------------------------------------
     Select Case UCase$(TWMode)
-
         Case "", "NONE"
             'Do nothing when TW is not requested
-
         Case "ALL OFF"
             'Disable all supported TW settings
                 cPM.TW_Turn_OFF TW_Enum.None
-
         Case "KEEP SCREENUPDATING"
             'Keep ScreenUpdating ON
                 cPM.TW_Turn_OFF TW_Enum.ScreenUpdating
-
         Case "KEEP ENABLEEVENTS"
             'Keep EnableEvents ON
                 cPM.TW_Turn_OFF TW_Enum.EnableEvents
-
         Case "KEEP SCREENUPDATING+ENABLEEVENTS"
             'Keep both ScreenUpdating and EnableEvents ON
                 cPM.TW_Turn_OFF (TW_Enum.ScreenUpdating Or TW_Enum.EnableEvents)
-
         Case Else
             'Fallback: treat unknown text as no TW action
-
     End Select
 
 End Sub
@@ -2531,10 +2514,14 @@ Private Function cPM_Demo_GetConfiguredTargetRange( _
 '     Resolved one-column target range
 '
 ' ERROR POLICY
-'   Raises errors normally
+'   Raises when:
+'     - the configured address is blank
+'     - the configured address cannot be resolved on DATA_cPM
+'     - the configured address resolves to more than one cell
+'     - the requested resized range would exceed worksheet row limits
 '
 ' UPDATED
-'   2026-04-15
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -2543,6 +2530,8 @@ Private Function cPM_Demo_GetConfiguredTargetRange( _
     Dim WS_Data             As Worksheet         'DATA worksheet
     Dim TargetAddress       As String            'Configured anchor-cell address
     Dim AnchorCell          As Range             'Top-left anchor cell of the target range
+    Dim RowCount            As Long              'Requested target row count
+    Dim LastRequiredRow     As Long              'Last row required by the resized target
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -2554,19 +2543,59 @@ Private Function cPM_Demo_GetConfiguredTargetRange( _
 ' READ CONFIGURED TARGET ADDRESS
 '------------------------------------------------------------------------------
     'Read the text address stored in the workbook-level named input cell
-        TargetAddress = CStr(ThisWorkbook.Names(AddressNameText).RefersToRange.Value)
+        TargetAddress = _
+            Trim$(CStr(ThisWorkbook.Names(AddressNameText).RefersToRange.Value))
+    'Reject blank configured addresses
+        If Len(TargetAddress) = 0 Then
+            Err.Raise vbObjectError + 2100, "cPM_Demo_GetConfiguredTargetRange", _
+                "The configured target address is blank for name '" & _
+                AddressNameText & "'"
+        End If
 
 '------------------------------------------------------------------------------
 ' RESOLVE TARGET ANCHOR
 '------------------------------------------------------------------------------
-    'Resolve the top-left cell of the configured target range
-        Set AnchorCell = WS_Data.Range(TargetAddress).Cells(1, 1)
+    'Resolve the configured target anchor on DATA_cPM
+        On Error GoTo InvalidAddress
+        Set AnchorCell = WS_Data.Range(TargetAddress)
+        On Error GoTo 0
+    'Reject multi-cell configured addresses
+        If AnchorCell.Cells.CountLarge <> 1 Then
+            Err.Raise vbObjectError + 2101, "cPM_Demo_GetConfiguredTargetRange", _
+                "The configured target address must resolve to exactly one cell on '" _
+                & cPM_SHEET_DATA & "'"
+        End If
+
+'------------------------------------------------------------------------------
+' VALIDATE REQUESTED SIZE
+'------------------------------------------------------------------------------
+    'Read the requested target row count
+        RowCount = cPM_Demo_GetRangeRows()
+    'Resolve the last worksheet row required by the resized target
+        LastRequiredRow = AnchorCell.Row + RowCount - 1
+    'Reject targets that would run past the worksheet row limit
+        If LastRequiredRow > WS_Data.Rows.Count Then
+            Err.Raise vbObjectError + 2102, _
+                      "cPM_Demo_GetConfiguredTargetRange", _
+                      "The configured target range exceeds the available rows on '" & cPM_SHEET_DATA & "'"
+        End If
 
 '------------------------------------------------------------------------------
 ' RETURN RESIZED RANGE
 '------------------------------------------------------------------------------
     'Return the target range resized to the requested number of rows
-        Set cPM_Demo_GetConfiguredTargetRange = AnchorCell.Resize(cPM_Demo_GetRangeRows(), 1)
+        Set cPM_Demo_GetConfiguredTargetRange = AnchorCell.Resize(RowCount, 1)
+
+    Exit Function
+
+InvalidAddress:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+    'Raise a clearer error when the configured address cannot be resolved
+        Err.Raise vbObjectError + 2103, _
+                  "cPM_Demo_GetConfiguredTargetRange", _
+                  "The configured target address '" & TargetAddress & "' is invalid on '" & cPM_SHEET_DATA & "'"
 
 End Function
 
@@ -2613,6 +2642,18 @@ Private Function cPM_Demo_GetFormulaFillExpr() As String
 '
 ' ERROR POLICY
 '   Raises errors normally
+'
+' NOTES
+'   The configured formula text is expected to be stored in invariant Excel /
+'   VBA formula syntax suitable for Range.Formula assignment, for example:
+'
+'     =RAND()
+'     =ROW()*2
+'     =SUM(A1:A10)
+'
+'   This demo does not use FormulaLocal and therefore does not expect localized
+'   function names or locale-specific list separators in the configured formula
+'   text
 '
 ' UPDATED
 '   2026-04-15
@@ -2703,10 +2744,8 @@ Private Sub cPM_Demo_AppendLog( _
 '------------------------------------------------------------------------------
     'Resolve the results-log table on the demo sheet
         Set Lo = ThisWorkbook.Worksheets(cPM_SHEET_DEMO).ListObjects(cPM_TABLE_LOG)
-
     'Add one new row to the table
         Set LR = Lo.ListRows.Add
-
     'Compute the sequential run ID from the current body-row count
         RunID = Lo.ListRows.Count
 
@@ -2716,42 +2755,32 @@ Private Sub cPM_Demo_AppendLog( _
     'Write the run ID
         LR.Range(1, 1).Value = RunID
         LR.Range(1, 1).HorizontalAlignment = xlCenter
-
     'Write the timestamp
         LR.Range(1, 2).Value = Now
         LR.Range(1, 2).HorizontalAlignment = xlCenter
-
     'Write the scenario label
         LR.Range(1, 3).Value = ScenarioText
         LR.Range(1, 3).HorizontalAlignment = xlCenter
-
     'Write the method ID
         LR.Range(1, 4).Value = MethodID
         LR.Range(1, 4).HorizontalAlignment = xlCenter
-
     'Write the method name
         LR.Range(1, 5).Value = MethodNameText
         LR.Range(1, 5).HorizontalAlignment = xlCenter
-
     'Write the numeric elapsed seconds
         LR.Range(1, 6).Value = ElapsedSecondsValue
         LR.Range(1, 6).HorizontalAlignment = xlCenter
-
     'Write the formatted elapsed time
         LR.Range(1, 7).Value = ElapsedTimeText
-
     'Write T1
         LR.Range(1, 8).Value = T1Value
         LR.Range(1, 8).HorizontalAlignment = xlCenter
-
     'Write T2
         LR.Range(1, 9).Value = T2Value
         LR.Range(1, 9).HorizontalAlignment = xlCenter
-
     'Write ET
         LR.Range(1, 10).Value = ETValue
         LR.Range(1, 10).HorizontalAlignment = xlCenter
-
     'Write notes
         LR.Range(1, 11).Value = NotesText
 
@@ -2760,7 +2789,6 @@ Private Sub cPM_Demo_AppendLog( _
 '------------------------------------------------------------------------------
     'Format the timestamp
         LR.Range(1, 2).NumberFormat = "yyyy-mm-dd hh:mm:ss"
-
     'Format the numeric timing outputs
         LR.Range(1, 6).NumberFormat = "0.000000000"
         LR.Range(1, 8).NumberFormat = "0.000000000"
