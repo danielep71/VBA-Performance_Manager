@@ -118,7 +118,8 @@ Public Sub Run_cPerformanceManager_RegressionSuite()
 '   - Resets suite counters and run-level state
 '   - Builds or rebuilds the dedicated regression worksheet
 '   - Initializes the worksheet log and suite header
-'   - Executes all regression cases in deterministic order
+'   - Executes all regression cases in a deterministic order
+'   - Updates the Excel status bar with live suite progress
 '   - Forces a clean TW baseline again at the end of the suite
 '   - Prints the suite footer when the logging infrastructure is ready
 '   - Restores Application state before re-raising any unexpected runner error
@@ -138,11 +139,14 @@ Public Sub Run_cPerformanceManager_RegressionSuite()
 '   - Suite_InitLogSheet
 '   - Suite_PrintHeader
 '   - Suite_PrintFooter
+'   - Demo_SB_SetProgress
 '   - All private Test_* procedures in this module
 '
 ' NOTES
 '   The suite is intentionally ordered from simpler / core behaviors toward
 '   shared-state and cleanup behaviors
+'
+'   TotalSteps must be kept aligned with the number of executed regression cases
 '
 ' UPDATED
 '   2026-04-18
@@ -163,6 +167,10 @@ Public Sub Run_cPerformanceManager_RegressionSuite()
     Dim SavedErrSrc             As String               'Captured error source
     Dim SavedErrDesc            As String               'Captured error description
 
+    Dim CurrentStep             As Long                 'Current regression-step counter
+
+    Const TotalSteps            As Long = 40            'Total number of executed regression cases
+
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
@@ -181,6 +189,9 @@ Public Sub Run_cPerformanceManager_RegressionSuite()
         FastModeOn = True
     'Show a wait cursor while the regression environment is being prepared
         Application.Cursor = xlWait
+    'Initialize status-bar progress
+        CurrentStep = 0
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "Preparing regression environment"
 
 '------------------------------------------------------------------------------
 ' PREPARE REGRESSION SHEET
@@ -189,7 +200,7 @@ Public Sub Run_cPerformanceManager_RegressionSuite()
         DEMO_Build_DemoTemplate _
             cPM_SHEET_LOG, _
             "CLASS PERFORMANCE MANAGER", _
-            "REGRESSION TESTS", , , , , , , , , , , , , , , "Q", 41
+            "REGRESSION TESTS", , 6, , , , "C:O", , , , , , , , , , 47
     'Resolve the prepared regression worksheet
         Set WS_Test = WB.Worksheets(cPM_SHEET_LOG)
     'Initialize the dedicated worksheet log
@@ -203,93 +214,219 @@ Public Sub Run_cPerformanceManager_RegressionSuite()
 ' RUN CORE / TIMING REGRESSION CASES
 '------------------------------------------------------------------------------
     'Validate constructor/default state
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "Default constructor state"
         Test_DefaultState
+
     'Validate valid MethodName mappings
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "MethodName valid indices"
         Test_MethodName_ValidIndices
+
     'Validate invalid MethodName behavior
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "MethodName invalid indices"
         Test_MethodName_InvalidIndices
+
     'Validate StartTimer session-state transitions for all methods
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "StartTimer session state"
         Test_StartTimer_SetsSessionState_AllMethods
+
     'Validate numeric elapsed-time reads for all methods
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "ElapsedSeconds across methods"
         Test_ElapsedSeconds_AllMethods
+
     'Validate formatted elapsed-time reads for all methods
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "ElapsedTime across methods"
         Test_ElapsedTime_AllMethods
+
     'Validate formatting of an already measured elapsed-seconds value
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "ElapsedTime format existing seconds"
         Test_ElapsedTime_FormatExistingSeconds
+
     'Validate aligned-start timing for all methods
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "Aligned-start timing"
         Test_AlignedStart_AllMethods
+
     'Validate raw accessor behavior after a QPC measurement
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "Raw/cached accessors after QPC"
         Test_Accessors_QPC
 
 '------------------------------------------------------------------------------
 ' RUN VALIDATION / FALLBACK REGRESSION CASES
 '------------------------------------------------------------------------------
     'Validate strict-mode behavior when elapsed time is requested before StartTimer
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "StrictMode: elapsed before StartTimer"
         Test_StrictMode_ElapsedBeforeStart
+
     'Validate strict-mode behavior for explicit method mismatch
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "StrictMode: method mismatch"
         Test_StrictMode_MethodMismatch
+
     'Validate strict-mode behavior for invalid start-method input
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "StrictMode: invalid StartTimer method"
         Test_StrictMode_InvalidStartMethod
+
     'Validate non-strict fallback for invalid start-method input
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "NonStrictMode: invalid StartTimer fallback"
         Test_NonStrictMode_InvalidStartFallback
+
     'Validate non-strict fallback for explicit elapsed-method mismatch
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "NonStrictMode: elapsed-method mismatch fallback"
         Test_NonStrictMode_MethodMismatchFallback
 
 '------------------------------------------------------------------------------
 ' RUN DIAGNOSTIC / OVERHEAD REGRESSION CASES
 '------------------------------------------------------------------------------
     'Validate numeric overhead measurement helpers
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "OverheadMeasurement_Seconds"
         Test_OverheadMeasurement_Seconds
+
     'Validate formatted overhead measurement helpers
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "OverheadMeasurement_Text"
         Test_OverheadMeasurement_Text
+
     'Validate diagnostic / informational properties
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "Diagnostics and informational properties"
         Test_Diagnostics_Properties
 
 '------------------------------------------------------------------------------
 ' RUN PAUSE REGRESSION CASES
 '------------------------------------------------------------------------------
     'Validate Pause method 1
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "Pause method 1"
         Test_Pause_Method1
+
     'Validate Pause method 2
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "Pause method 2"
         Test_Pause_Method2
+
     'Validate Pause method 3
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "Pause method 3"
         Test_Pause_Method3
+
     'Validate Pause method 4
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "Pause method 4"
         Test_Pause_Method4
 
 '------------------------------------------------------------------------------
 ' RUN TW / CLEANUP REGRESSION CASES
 '------------------------------------------------------------------------------
     'Validate blank-key behavior in the shared TW manager
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "TW blank-key validation"
         Test_TW_BlankKeyValidation
+
     'Validate single-instance TW lifecycle
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "TW single-instance lifecycle"
         Test_TW_SingleInstance
+
     'Validate overlapping multi-instance TW lifecycle
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "TW overlapping multi-instance lifecycle"
         Test_TW_OverlappingInstances
+
     'Validate ResetEnvironment idempotence and cleanup behavior
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "ResetEnvironment idempotence"
         Test_ResetEnvironment_Idempotent
 
 '------------------------------------------------------------------------------
 ' RUN CHECKPOINT / REPORTING REGRESSION CASES
 '------------------------------------------------------------------------------
     'Validate that Checkpoint raises before StartTimer
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "Checkpoint before StartTimer"
         Test_Checkpoint_BeforeStart
+
     'Validate SetRunLabel before first checkpoint
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "SetRunLabel before first checkpoint"
         Test_SetRunLabel_BeforeFirstCheckpoint
+
     'Validate SetRunLabel rejection after first checkpoint
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "SetRunLabel after first checkpoint"
         Test_SetRunLabel_AfterFirstCheckpoint
+
     'Validate default checkpoint naming when the supplied name is blank
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "Checkpoint default name when blank"
         Test_Checkpoint_DefaultName_WhenBlank
+
     'Validate checkpoint count and ReportAsArray structure/content
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "CheckpointCount and ReportAsArray"
         Test_CheckpointCount_And_ReportArray
+
     'Validate ReportAsText behavior when no checkpoints exist
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "ReportAsText when empty"
         Test_ReportAsText_Empty
+
     'Validate ReportAsText behavior after checkpoint capture
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "ReportAsText with checkpoints"
         Test_ReportAsText_WithCheckpoints
+
     'Validate ClearCheckpoints behavior
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "ClearCheckpoints"
         Test_ClearCheckpoints
+
     'Validate that StartTimer resets checkpoint/report state
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "StartTimer clears checkpoint state"
         Test_StartTimer_ClearsCheckpointState
+
+    'Validate direct empty-array export when no checkpoints exist
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "ReportAsArray direct empty export"
+        Test_ReportAsArray_Empty_Direct
+
+    'Validate delta/cumulative checkpoint timing semantics
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "Checkpoint delta/cumulative semantics"
+        Test_Checkpoint_DeltaAndCumulativeSemantics
+
+    'Validate reuse of the same session after ClearCheckpoints
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "ClearCheckpoints then reuse session"
+        Test_ClearCheckpoints_ThenReuseSession
+
+    'Validate SetRunLabel after ClearCheckpoints
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "SetRunLabel after ClearCheckpoints"
+        Test_SetRunLabel_AfterClearCheckpoints
+
+    'Validate idempotent TW_Turn_ON behavior when no TW session is active
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "TW_Turn_ON when inactive"
+        Test_TW_Turn_ON_WhenInactive
+
+    'Validate Pause no-op boundary behavior
+        CurrentStep = CurrentStep + 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "Pause no-op boundary behavior"
+        Test_Pause_Boundary_NoOpBehavior
 
 Clean_Exit:
 '------------------------------------------------------------------------------
@@ -311,6 +448,8 @@ Clean_Exit:
         If FooterCanPrint Then
             Suite_PrintFooter
         End If
+    'Clear the custom status-bar message
+        Application.StatusBar = False
     'Restore the normal cursor
         Application.Cursor = xlDefault
     'Restore the original Excel Application state only when fast mode was entered
@@ -484,14 +623,6 @@ Private Sub Suite_InitLogSheet()
         Set WS = Suite_GetOrCreateLogSheet()
 
 '------------------------------------------------------------------------------
-' ADJUST WORKSHEET LAYOUT
-'------------------------------------------------------------------------------
-    'Insert the extra columns required by the failure-detail section layout
-        WS.Columns("L:M").Insert _
-            Shift:=xlToRight, _
-            CopyOrigin:=xlFormatFromLeftOrAbove
-
-'------------------------------------------------------------------------------
 ' DEFINE HEADER SETS
 '------------------------------------------------------------------------------
     'Define the case-summary headers
@@ -577,7 +708,7 @@ Private Sub Suite_InitLogSheet()
     ' APPLY VISUAL FRAME
     '--------------------------------------------------------------------------
         'Apply a border around the visible case-summary block
-            DEMO_Set_RangeBorder WS.Range("C4:H39")
+            DEMO_Set_RangeBorder WS.Range("C4:H45")
 
 '------------------------------------------------------------------------------
 ' BUILD FAILURE DETAILS AREA
@@ -612,7 +743,7 @@ Private Sub Suite_InitLogSheet()
     ' APPLY VISUAL FRAME
     '--------------------------------------------------------------------------
         'Apply a border around the visible failure-detail block
-            DEMO_Set_RangeBorder WS.Range("I4:O39")
+            DEMO_Set_RangeBorder WS.Range("I4:O45")
 
 '------------------------------------------------------------------------------
 ' INITIALIZE ROW POINTERS
@@ -4922,4 +5053,702 @@ CleanFail:
         Resume CleanExit
 
 End Sub
+Private Sub Test_ReportAsArray_Empty_Direct()
+'
+'==============================================================================
+'                    TEST REPORTASARRAY EMPTY DIRECT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Validates ReportAsArray behavior when no checkpoints exist
+'
+' WHY THIS EXISTS
+'   The class should return a deterministic header-only array even when no
+'   checkpoint has been captured
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
 
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim Arr                 As Variant                'Structured report export
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Start the regression case
+        Case_Begin "ReportAsArray direct empty export"
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
+    'Create a fresh class instance
+        Set cPM = New cPerformanceManager
+
+'------------------------------------------------------------------------------
+' READ EMPTY EXPORT
+'------------------------------------------------------------------------------
+    'Read the structured report before any checkpoint is captured
+        Arr = cPM.ReportAsArray
+
+'------------------------------------------------------------------------------
+' ASSERT ARRAY SHAPE
+'------------------------------------------------------------------------------
+    'Assert header-only row count
+        Test_Assert_EqualLong 1, UBound(Arr, 1), _
+                              "ReportAsArray returns a single header row when no checkpoints exist"
+    'Assert stable column count
+        Test_Assert_EqualLong 8, UBound(Arr, 2), _
+                              "ReportAsArray returns 8 columns when no checkpoints exist"
+
+'------------------------------------------------------------------------------
+' ASSERT HEADER ROW
+'------------------------------------------------------------------------------
+    'Assert header column 1
+        Test_Assert_EqualString "RunLabel", CStr(Arr(1, 1)), _
+                                "ReportAsArray empty export header column 1"
+    'Assert header column 2
+        Test_Assert_EqualString "Seq", CStr(Arr(1, 2)), _
+                                "ReportAsArray empty export header column 2"
+    'Assert header column 3
+        Test_Assert_EqualString "Checkpoint", CStr(Arr(1, 3)), _
+                                "ReportAsArray empty export header column 3"
+    'Assert header column 4
+        Test_Assert_EqualString "Note", CStr(Arr(1, 4)), _
+                                "ReportAsArray empty export header column 4"
+    'Assert header column 5
+        Test_Assert_EqualString "MethodID", CStr(Arr(1, 5)), _
+                                "ReportAsArray empty export header column 5"
+    'Assert header column 6
+        Test_Assert_EqualString "MethodName", CStr(Arr(1, 6)), _
+                                "ReportAsArray empty export header column 6"
+    'Assert header column 7
+        Test_Assert_EqualString "DeltaSeconds", CStr(Arr(1, 7)), _
+                                "ReportAsArray empty export header column 7"
+    'Assert header column 8
+        Test_Assert_EqualString "CumulativeSeconds", CStr(Arr(1, 8)), _
+                                "ReportAsArray empty export header column 8"
+
+CleanExit:
+'------------------------------------------------------------------------------
+' CLEANUP
+'------------------------------------------------------------------------------
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
+        If Not cPM Is Nothing Then
+            cPM.ResetEnvironment
+            Set cPM = Nothing
+        End If
+        On Error GoTo 0
+
+    'Finalize the current case
+        Case_Finalize
+
+    Exit Sub
+
+CleanFail:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+    'Record the unexpected case-level error
+        RecordUnexpectedError "Test_ReportAsArray_Empty_Direct"
+    'Continue through centralized cleanup
+        Resume CleanExit
+
+End Sub
+
+
+Private Sub Test_Checkpoint_DeltaAndCumulativeSemantics()
+'
+'==============================================================================
+'            TEST CHECKPOINT DELTA AND CUMULATIVE SEMANTICS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Validates semantic relationships between checkpoint delta and cumulative
+'   timing values
+'
+' WHY THIS EXISTS
+'   Structured checkpoint reporting is only useful if exported timing values
+'   remain internally coherent
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim Arr                 As Variant                'Structured report export
+    Dim Delta1              As Double                 'First checkpoint delta
+    Dim Delta2              As Double                 'Second checkpoint delta
+    Dim Cum1                As Double                 'First checkpoint cumulative
+    Dim Cum2                As Double                 'Second checkpoint cumulative
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Start the regression case
+        Case_Begin "Checkpoint delta/cumulative semantics"
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
+    'Create a fresh class instance
+        Set cPM = New cPerformanceManager
+
+'------------------------------------------------------------------------------
+' PREPARE SESSION
+'------------------------------------------------------------------------------
+    'Start a fresh timing session
+        cPM.StartTimer 5, False
+
+'------------------------------------------------------------------------------
+' CAPTURE CHECKPOINTS
+'------------------------------------------------------------------------------
+    'Perform a short pause before the first checkpoint
+        cPM.Pause 0.02, 1
+    'Capture the first checkpoint
+        cPM.Checkpoint "Phase 1"
+
+    'Perform a short pause before the second checkpoint
+        cPM.Pause 0.02, 1
+    'Capture the second checkpoint
+        cPM.Checkpoint "Phase 2"
+
+'------------------------------------------------------------------------------
+' EXPORT STRUCTURED REPORT
+'------------------------------------------------------------------------------
+    'Export the structured checkpoint report
+        Arr = cPM.ReportAsArray
+
+'------------------------------------------------------------------------------
+' RESOLVE TIMING VALUES
+'------------------------------------------------------------------------------
+    'Resolve the first checkpoint delta
+        Delta1 = CDbl(Arr(2, 7))
+    'Resolve the second checkpoint delta
+        Delta2 = CDbl(Arr(3, 7))
+    'Resolve the first checkpoint cumulative time
+        Cum1 = CDbl(Arr(2, 8))
+    'Resolve the second checkpoint cumulative time
+        Cum2 = CDbl(Arr(3, 8))
+
+'------------------------------------------------------------------------------
+' ASSERT BASIC NONNEGATIVITY
+'------------------------------------------------------------------------------
+    'Assert nonnegative first checkpoint delta
+        Test_Assert_NonNegativeDouble Delta1, _
+                                      "First checkpoint delta is nonnegative"
+    'Assert nonnegative second checkpoint delta
+        Test_Assert_NonNegativeDouble Delta2, _
+                                      "Second checkpoint delta is nonnegative"
+    'Assert nonnegative first checkpoint cumulative time
+        Test_Assert_NonNegativeDouble Cum1, _
+                                      "First checkpoint cumulative time is nonnegative"
+    'Assert nonnegative second checkpoint cumulative time
+        Test_Assert_NonNegativeDouble Cum2, _
+                                      "Second checkpoint cumulative time is nonnegative"
+
+'------------------------------------------------------------------------------
+' ASSERT FIRST-CHECKPOINT SEMANTICS
+'------------------------------------------------------------------------------
+    'Assert that the first checkpoint cumulative time matches its delta
+        Test_Assert_ApproxDouble Delta1, Cum1, 0.000000001, _
+                                 "First checkpoint cumulative time matches first checkpoint delta"
+
+'------------------------------------------------------------------------------
+' ASSERT MONOTONIC / DIFFERENCE SEMANTICS
+'------------------------------------------------------------------------------
+    'Assert that cumulative timing is nondecreasing
+        Test_Assert_True (Cum2 >= Cum1), _
+                         "Checkpoint cumulative timing is nondecreasing"
+
+    'Assert that each cumulative value is at least as large as its delta
+        Test_Assert_True (Cum1 >= Delta1), _
+                         "First checkpoint cumulative time is at least as large as first checkpoint delta"
+        Test_Assert_True (Cum2 >= Delta2), _
+                         "Second checkpoint cumulative time is at least as large as second checkpoint delta"
+
+    'Assert that the second delta equals the incremental cumulative difference
+        Test_Assert_ApproxDouble Delta2, (Cum2 - Cum1), 0.000000001, _
+                                 "Second checkpoint delta matches the incremental cumulative difference"
+
+CleanExit:
+'------------------------------------------------------------------------------
+' CLEANUP
+'------------------------------------------------------------------------------
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
+        If Not cPM Is Nothing Then
+            cPM.ResetEnvironment
+            Set cPM = Nothing
+        End If
+        On Error GoTo 0
+
+    'Finalize the current case
+        Case_Finalize
+
+    Exit Sub
+
+CleanFail:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+    'Record the unexpected case-level error
+        RecordUnexpectedError "Test_Checkpoint_DeltaAndCumulativeSemantics"
+    'Continue through centralized cleanup
+        Resume CleanExit
+
+End Sub
+
+
+Private Sub Test_ClearCheckpoints_ThenReuseSession()
+'
+'==============================================================================
+'               TEST CLEARCHECKPOINTS THEN REUSE SESSION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Validates that the same session can continue normally after ClearCheckpoints
+'
+' WHY THIS EXISTS
+'   Callers may want to clear structured checkpoint/report state and then
+'   continue using the same class instance without starting over
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim Arr                 As Variant                'Structured report export
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Start the regression case
+        Case_Begin "ClearCheckpoints then reuse session"
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
+    'Create a fresh class instance
+        Set cPM = New cPerformanceManager
+
+'------------------------------------------------------------------------------
+' PREPARE SESSION
+'------------------------------------------------------------------------------
+    'Start a fresh timing session
+        cPM.StartTimer 5, False
+    'Perform a short pause
+        cPM.Pause 0.02, 1
+    'Capture the first checkpoint
+        cPM.Checkpoint "Phase 1"
+
+'------------------------------------------------------------------------------
+' CLEAR CHECKPOINT STATE
+'------------------------------------------------------------------------------
+    'Clear the structured checkpoint/report state
+        cPM.ClearCheckpoints
+
+'------------------------------------------------------------------------------
+' REUSE SESSION
+'------------------------------------------------------------------------------
+    'Perform another short pause
+        cPM.Pause 0.02, 1
+    'Capture a new checkpoint after clearing
+        cPM.Checkpoint "Phase 2"
+
+'------------------------------------------------------------------------------
+' ASSERT REUSED SESSION OUTPUT
+'------------------------------------------------------------------------------
+    'Export the structured checkpoint report
+        Arr = cPM.ReportAsArray
+
+    'Assert one captured checkpoint after reuse
+        Test_Assert_EqualLong 1, cPM.CheckpointCount, _
+                              "CheckpointCount after ClearCheckpoints and reuse"
+    'Assert that the surviving exported checkpoint is the new one
+        Test_Assert_EqualString "Phase 2", CStr(Arr(2, 3)), _
+                                "ReportAsArray contains only the new checkpoint after reuse"
+    'Assert that the exported sequence restarts at 1 after clearing
+        Test_Assert_EqualLong 1, Arr(2, 2), _
+                              "Checkpoint sequence restarts at 1 after ClearCheckpoints"
+
+CleanExit:
+'------------------------------------------------------------------------------
+' CLEANUP
+'------------------------------------------------------------------------------
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
+        If Not cPM Is Nothing Then
+            cPM.ResetEnvironment
+            Set cPM = Nothing
+        End If
+        On Error GoTo 0
+
+    'Finalize the current case
+        Case_Finalize
+
+    Exit Sub
+
+CleanFail:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+    'Record the unexpected case-level error
+        RecordUnexpectedError "Test_ClearCheckpoints_ThenReuseSession"
+    'Continue through centralized cleanup
+        Resume CleanExit
+
+End Sub
+
+
+Private Sub Test_SetRunLabel_AfterClearCheckpoints()
+'
+'==============================================================================
+'                TEST SETRUNLABEL AFTER CLEARCHECKPOINTS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Validates that SetRunLabel is usable again after ClearCheckpoints
+'
+' WHY THIS EXISTS
+'   ClearCheckpoints resets structured reporting state, so the run label should
+'   again be assignable before the next checkpoint is captured
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim Arr                 As Variant                'Structured report export
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Start the regression case
+        Case_Begin "SetRunLabel after ClearCheckpoints"
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
+    'Create a fresh class instance
+        Set cPM = New cPerformanceManager
+
+'------------------------------------------------------------------------------
+' PREPARE INITIAL SESSION STATE
+'------------------------------------------------------------------------------
+    'Start a fresh timing session
+        cPM.StartTimer 5, False
+    'Assign the initial run label
+        cPM.SetRunLabel "Run A"
+    'Perform a short pause
+        cPM.Pause 0.02, 1
+    'Capture one checkpoint under the initial run label
+        cPM.Checkpoint "Phase 1"
+
+'------------------------------------------------------------------------------
+' CLEAR CHECKPOINT STATE
+'------------------------------------------------------------------------------
+    'Clear the structured checkpoint/report state
+        cPM.ClearCheckpoints
+
+'------------------------------------------------------------------------------
+' ASSIGN NEW RUN LABEL
+'------------------------------------------------------------------------------
+    'Assign a new run label after clearing checkpoint state
+        cPM.SetRunLabel "Run B"
+
+'------------------------------------------------------------------------------
+' CAPTURE NEW CHECKPOINT
+'------------------------------------------------------------------------------
+    'Perform a short pause
+        cPM.Pause 0.02, 1
+    'Capture one checkpoint under the new run label
+        cPM.Checkpoint "Phase 2"
+
+'------------------------------------------------------------------------------
+' ASSERT NEW RUN-LABEL EXPORT
+'------------------------------------------------------------------------------
+    'Export the structured checkpoint report
+        Arr = cPM.ReportAsArray
+
+    'Assert that the current run label is updated
+        Test_Assert_EqualString "Run B", cPM.RunLabel, _
+                                "RunLabel can be reassigned after ClearCheckpoints"
+    'Assert one captured checkpoint after reassignment
+        Test_Assert_EqualLong 1, cPM.CheckpointCount, _
+                              "CheckpointCount after SetRunLabel following ClearCheckpoints"
+    'Assert that the exported run label matches the reassigned value
+        Test_Assert_EqualString "Run B", CStr(Arr(2, 1)), _
+                                "ReportAsArray exports the reassigned run label after ClearCheckpoints"
+    'Assert that the exported checkpoint belongs to the second phase
+        Test_Assert_EqualString "Phase 2", CStr(Arr(2, 3)), _
+                                "ReportAsArray exports the new checkpoint after reassigned run label"
+
+CleanExit:
+'------------------------------------------------------------------------------
+' CLEANUP
+'------------------------------------------------------------------------------
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
+        If Not cPM Is Nothing Then
+            cPM.ResetEnvironment
+            Set cPM = Nothing
+        End If
+        On Error GoTo 0
+
+    'Finalize the current case
+        Case_Finalize
+
+    Exit Sub
+
+CleanFail:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+    'Record the unexpected case-level error
+        RecordUnexpectedError "Test_SetRunLabel_AfterClearCheckpoints"
+    'Continue through centralized cleanup
+        Resume CleanExit
+
+End Sub
+
+
+Private Sub Test_TW_Turn_ON_WhenInactive()
+'
+'==============================================================================
+'                    TEST TW TURN ON WHEN INACTIVE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Validates idempotent TW_Turn_ON behavior when no TW session is active
+'
+' WHY THIS EXISTS
+'   The TW lifecycle surface should remain safe when callers attempt to end TW
+'   participation that does not currently exist
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim Baseline            As T_AppState             'Captured Application baseline
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Start the regression case
+        Case_Begin "TW_Turn_ON when inactive"
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
+    'Force the shared TW manager to a clean baseline
+        PM_TW_EndAllSessions
+    'Create a fresh class instance
+        Set cPM = New cPerformanceManager
+    'Capture the current Application baseline
+        CaptureAppState Baseline
+
+'------------------------------------------------------------------------------
+' APPLY NO-OP TW TURN ON
+'------------------------------------------------------------------------------
+    'Attempt to end TW participation when no TW session is active
+        cPM.TW_Turn_ON
+
+'------------------------------------------------------------------------------
+' ASSERT IDLE STATE
+'------------------------------------------------------------------------------
+    'Assert that the instance remains inactive
+        Test_Assert_EqualBoolean False, cPM.TW_IsActive, _
+                                 "TW_IsActive remains False when TW_Turn_ON is called while inactive"
+    'Assert that the shared TW manager remains idle
+        Test_Assert_EqualLong 0, cPM.TW_ActiveSessionCount, _
+                              "TW_ActiveSessionCount remains 0 when TW_Turn_ON is called while inactive"
+
+'------------------------------------------------------------------------------
+' ASSERT APPLICATION STATE UNCHANGED
+'------------------------------------------------------------------------------
+    'Assert that Application state remains unchanged
+        Test_Assert_EqualBoolean Baseline.ScreenUpdating, Application.ScreenUpdating, _
+                                 "ScreenUpdating remains unchanged when TW_Turn_ON is called while inactive"
+        Test_Assert_EqualBoolean Baseline.EnableEvents, Application.EnableEvents, _
+                                 "EnableEvents remains unchanged when TW_Turn_ON is called while inactive"
+        Test_Assert_EqualBoolean Baseline.DisplayAlerts, Application.DisplayAlerts, _
+                                 "DisplayAlerts remains unchanged when TW_Turn_ON is called while inactive"
+        Test_Assert_EqualLong Baseline.Calculation, Application.Calculation, _
+                              "Calculation remains unchanged when TW_Turn_ON is called while inactive"
+        Test_Assert_EqualLong Baseline.Cursor, Application.Cursor, _
+                              "Cursor remains unchanged when TW_Turn_ON is called while inactive"
+
+CleanExit:
+'------------------------------------------------------------------------------
+' CLEANUP
+'------------------------------------------------------------------------------
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
+        If Not cPM Is Nothing Then
+            cPM.ResetEnvironment
+            Set cPM = Nothing
+        End If
+
+    'Force the shared TW manager to a clean baseline
+        PM_TW_EndAllSessions
+        On Error GoTo 0
+
+    'Finalize the current case
+        Case_Finalize
+
+    Exit Sub
+
+CleanFail:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+    'Record the unexpected case-level error
+        RecordUnexpectedError "Test_TW_Turn_ON_WhenInactive"
+    'Continue through centralized cleanup
+        Resume CleanExit
+
+End Sub
+
+
+Private Sub Test_Pause_Boundary_NoOpBehavior()
+'
+'==============================================================================
+'                   TEST PAUSE BOUNDARY NO-OP BEHAVIOR
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Validates no-op boundary behavior for Pause
+'
+' WHY THIS EXISTS
+'   The class documents that non-positive pause durations and excessively large
+'   pause durations are treated as no-op exits
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim cPM                 As cPerformanceManager    'Class under test
+    Dim ElapsedZero         As Double                 'Measured elapsed time for Pause 0
+    Dim ElapsedNegative     As Double                 'Measured elapsed time for negative pause
+    Dim ElapsedTooLarge     As Double                 'Measured elapsed time for oversized pause
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Start the regression case
+        Case_Begin "Pause no-op boundary behavior"
+    'Enable case-level unexpected-error handling
+        On Error GoTo CleanFail
+    'Create a fresh class instance
+        Set cPM = New cPerformanceManager
+
+'------------------------------------------------------------------------------
+' ASSERT PAUSE(0)
+'------------------------------------------------------------------------------
+    'Start QPC timing for the zero-duration pause
+        cPM.StartTimer 5, False
+    'Invoke Pause with zero seconds
+        cPM.Pause 0, 1
+    'Measure elapsed time
+        ElapsedZero = cPM.ElapsedSeconds(5)
+
+    'Assert near-no-op elapsed range for Pause(0)
+        Test_Assert_InRangeDouble 0#, 0.25, ElapsedZero, _
+                                  "Pause(0) behaves as a no-op"
+
+'------------------------------------------------------------------------------
+' ASSERT PAUSE(-1)
+'------------------------------------------------------------------------------
+    'Start QPC timing for the negative-duration pause
+        cPM.StartTimer 5, False
+    'Invoke Pause with a negative duration
+        cPM.Pause -1, 1
+    'Measure elapsed time
+        ElapsedNegative = cPM.ElapsedSeconds(5)
+
+    'Assert near-no-op elapsed range for negative Pause
+        Test_Assert_InRangeDouble 0#, 0.25, ElapsedNegative, _
+                                  "Pause(-1) behaves as a no-op"
+
+'------------------------------------------------------------------------------
+' ASSERT PAUSE(> 3600)
+'------------------------------------------------------------------------------
+    'Start QPC timing for the oversized-duration pause
+        cPM.StartTimer 5, False
+    'Invoke Pause with a duration beyond the allowed upper bound
+        cPM.Pause 3601, 1
+    'Measure elapsed time
+        ElapsedTooLarge = cPM.ElapsedSeconds(5)
+
+    'Assert near-no-op elapsed range for oversized Pause
+        Test_Assert_InRangeDouble 0#, 0.25, ElapsedTooLarge, _
+                                  "Pause(3601) behaves as a no-op"
+
+CleanExit:
+'------------------------------------------------------------------------------
+' CLEANUP
+'------------------------------------------------------------------------------
+    'Release any environment changes held by the instance on a best-effort basis
+        On Error Resume Next
+        If Not cPM Is Nothing Then
+            cPM.ResetEnvironment
+            Set cPM = Nothing
+        End If
+        On Error GoTo 0
+
+    'Finalize the current case
+        Case_Finalize
+
+    Exit Sub
+
+CleanFail:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+    'Record the unexpected case-level error
+        RecordUnexpectedError "Test_Pause_Boundary_NoOpBehavior"
+    'Continue through centralized cleanup
+        Resume CleanExit
+
+End Sub
