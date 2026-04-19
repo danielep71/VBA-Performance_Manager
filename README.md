@@ -42,9 +42,7 @@ The class supports:
 - structured checkpoints and reporting
 - shared Excel “time-waster” suppression
 
-Importantly, the suppression features are **not limited to timed benchmarks**.
-
-They can also be used as a **general-purpose Excel/VBA performance aid** in procedures that do not measure elapsed time, reducing avoidable overhead from screen refresh, events, alerts, calculation-mode churn, and cursor updates during heavy operations.
+Importantly, the suppression features are **not limited to timed benchmarks**. They can also be used as a **general-purpose Excel/VBA performance aid** in procedures that do not measure elapsed time, reducing avoidable overhead from screen refresh, events, alerts, calculation-mode churn, and cursor updates during heavy operations.
 
 This makes `cPerformanceManager` more than a timer utility: it is a **runtime execution controller** for structured and performance-aware VBA solutions.
 
