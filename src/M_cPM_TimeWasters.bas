@@ -1,6 +1,6 @@
 Attribute VB_Name = "M_cPM_TimeWasters"
 '==============================================================================
-' MODULE: M_cPM_TimeWasters
+' MODULE: M_cPM_TIMEWASTERS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Shared, process-wide manager for Excel "time-waster" suppression used by
