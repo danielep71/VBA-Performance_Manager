@@ -134,9 +134,9 @@ The report can then be exported as:
 /README.md
 /src/cPerformanceManager.cls
 /src/M_cPM_TIMEWASTERS.bas
-/examples/M_cPM_DEMO.bas
-/examples/M_cPM_USAGE_EXAMPLES.bas
-/examples/M_DEMO_BUILDER.bas
+/demo/M_cPM_DEMO.bas
+/demo/M_cPM_USAGE_EXAMPLES.bas
+/demo/M_DEMO_BUILDER.bas
 /test/M_cPM_TEST.bas
 ```
 
@@ -151,13 +151,13 @@ These two files are required for normal use:
 
 These files are optional but useful:
 
-- `examples/M_cPM_USAGE_EXAMPLES.bas`  
+- `demo/M_cPM_USAGE_EXAMPLES.bas`  
   Compact usage examples and recommended integration patterns
 
-- `examples/M_cPM_DEMO.bas`  
+- `demo/M_cPM_DEMO.bas`  
   Interactive demo-sheet builder and runnable demo scenarios
 
-- `examples/M_DEMO_BUILDER.bas`  
+- `demo/M_DEMO_BUILDER.bas`  
   Shared worksheet/demo layout helpers used by the demo environment
 
 - `test/M_cPM_TEST.bas`  
@@ -226,9 +226,9 @@ Use shared “time-waster” suppression even when elapsed time is not being mea
 
 Optional:
 
-- import `examples/M_cPM_USAGE_EXAMPLES.bas`
-- import `examples/M_cPM_DEMO.bas`
-- import `examples/M_DEMO_BUILDER.bas`
+- import `demo/M_cPM_USAGE_EXAMPLES.bas`
+- import `demo/M_cPM_DEMO.bas`
+- import `demo/M_DEMO_BUILDER.bas`
 - import `test/M_cPM_TEST.bas`
 
 ---
@@ -461,8 +461,8 @@ cPM.TW_Turn_OFF TW_Enum.ScreenUpdating Or TW_Enum.EnableEvents
 
 ## Running examples and tests
 
-- Import `examples/M_cPM_USAGE_EXAMPLES.bas` for compact usage examples
-- Import `examples/M_cPM_DEMO.bas` and `examples/M_DEMO_BUILDER.bas` for the interactive demo workbook surface
+- Import `demo/M_cPM_USAGE_EXAMPLES.bas` for compact usage examples
+- Import `demo/M_cPM_DEMO.bas` and `examples/M_DEMO_BUILDER.bas` for the interactive demo workbook surface
 
 <img width="1917" height="915" alt="cPM Demo Control Panel" src="https://github.com/user-attachments/assets/efb40917-51d5-4494-87a5-bcd8fb2c97da" />
 
