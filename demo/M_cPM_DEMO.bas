@@ -800,11 +800,6 @@ Private Sub cPM_BuildHelpSheet(ByVal WS As Worksheet)
 
 End Sub
 
-'
-'==============================================================================
-'                         PUBLIC: EXECUTABLE DEMO ACTIONS
-'==============================================================================
-
 Public Sub cPM_RunBasicTiming()
 '
 '==============================================================================
@@ -822,6 +817,9 @@ Public Sub cPM_RunBasicTiming()
 '     - repeat the workload for the configured number of iterations
 '     - log the measured result
 '
+'   This version also supports optional in-loop progress in the Excel status
+'   bar, enabled only when the iteration count is high enough to justify it
+'
 ' INPUTS
 '   None
 '
@@ -834,6 +832,8 @@ Public Sub cPM_RunBasicTiming()
 '   - Reads the configured fill value
 '   - Reads the configured iteration count
 '   - Executes the timed value-fill workload repeatedly
+'   - Updates the status bar periodically during the timed loop only when
+'     Iterations >= 100
 '   - Appends one log row
 '
 ' ERROR POLICY
@@ -849,9 +849,16 @@ Public Sub cPM_RunBasicTiming()
 '   - cPM_Demo_ApplyTWMode
 '   - cPM_Demo_GetTWMode
 '   - cPM_Demo_AppendLog
+'   - Demo_SB_SetProgress
+'
+' NOTES
+'   Showing progress inside the timed loop adds UI overhead and therefore
+'   slightly contaminates the measurement. To reduce that effect:
+'     - in-loop progress is shown only when Iterations >= 100
+'     - the status bar is updated periodically rather than on every iteration
 '
 ' UPDATED
-'   2026-04-18
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -868,6 +875,8 @@ Public Sub cPM_RunBasicTiming()
     Dim ElapsedS            As Double                'Measured elapsed seconds
     Dim ElapsedTxt          As String                'Formatted elapsed-time text
     Dim Notes               As String                'Scenario note text
+    Dim ProgressEvery       As Long                  'Status-bar update frequency
+    Dim ProgressEnabled     As Boolean               'TRUE when in-loop progress should be shown
 
     Dim SavedErrNumber      As Long                  'Captured error number
     Dim SavedErrSource      As String                'Captured error source
@@ -896,6 +905,20 @@ Public Sub cPM_RunBasicTiming()
         Iterations = cPM_Demo_GetIterations()
 
 '------------------------------------------------------------------------------
+' RESOLVE PROGRESS POLICY
+'------------------------------------------------------------------------------
+    'Enable in-loop progress only for sufficiently large iteration counts
+        ProgressEnabled = (Iterations >= 100)
+
+    'Resolve the status-bar update interval only when progress is enabled
+        If ProgressEnabled Then
+            ProgressEvery = Iterations \ 100
+            If ProgressEvery < 1 Then
+                ProgressEvery = 1
+            End If
+        End If
+
+'------------------------------------------------------------------------------
 ' APPLY OPTIONAL TW MODE
 '------------------------------------------------------------------------------
     'Apply the selected TW mode before the measurement starts
@@ -906,6 +929,10 @@ Public Sub cPM_RunBasicTiming()
 '------------------------------------------------------------------------------
     'Clear the target range before starting the timed block
         Target.ClearContents
+    'Write an initial status-bar message before timing starts when enabled
+        If ProgressEnabled Then
+            Demo_SB_SetProgress 0, Iterations, "Basic Timing - " & cPM.MethodName(MethodID)
+        End If
 
 '------------------------------------------------------------------------------
 ' RUN WORKLOAD
@@ -916,6 +943,12 @@ Public Sub cPM_RunBasicTiming()
         For i = 1 To Iterations
             'Run the value-fill workload
                 Target.Value = FillValue
+            'Update the status bar periodically during the timed loop when enabled
+                If ProgressEnabled Then
+                    If (i = 1) Or ((i Mod ProgressEvery) = 0) Or (i = Iterations) Then
+                        Demo_SB_SetProgress i, Iterations, "Basic Timing - " & cPM.MethodName(MethodID)
+                    End If
+                End If
         Next i
 
 '------------------------------------------------------------------------------
@@ -957,11 +990,12 @@ CleanExit:
             Set cPM = Nothing
             On Error GoTo 0
         End If
+    'Return control of the status bar to Excel
+        Application.StatusBar = False
     'Re-raise the original error after cleanup when needed
         If SavedErrNumber <> 0 Then
             Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
         End If
-
     Exit Sub
 
 CleanFail:
@@ -976,7 +1010,6 @@ CleanFail:
         Resume CleanExit
 
 End Sub
-
 Public Sub cPM_RunAllMethods()
 '
 '==============================================================================
@@ -1002,7 +1035,9 @@ Public Sub cPM_RunAllMethods()
 '   - Reads the configured iteration count once
 '   - Reads the selected TW mode once
 '   - Loops through timing methods 1 to 6
-'   - Updates the Excel status bar with progress during execution
+'   - Updates the Excel status bar with method-level progress
+'   - Optionally updates the Excel status bar inside the iterations loop when
+'     Iterations >= 100
 '   - Executes the timed workload repeatedly for each method
 '   - Appends one log row per method
 '
@@ -1020,9 +1055,16 @@ Public Sub cPM_RunAllMethods()
 '   - cPM_Demo_ApplyTWMode
 '   - cPM_Demo_AppendLog
 '   - Demo_SB_SetProgress
+'   - cPM_Demo_MethodName
+'
+' NOTES
+'   Showing progress inside the timed loop adds UI overhead and therefore
+'   slightly contaminates the measurement. To reduce that effect:
+'     - in-loop progress is shown only when Iterations >= 100
+'     - the status bar is updated periodically rather than on every iteration
 '
 ' UPDATED
-'   2026-04-18
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1045,7 +1087,10 @@ Public Sub cPM_RunAllMethods()
     Dim ElapsedTxt          As String                'Formatted elapsed-time text
     Dim Notes               As String                'Scenario note text
 
-    Dim CurrentStep         As Long                  'Current progress step
+    Dim CurrentStep         As Long                  'Current method-level progress step
+    Dim ProgressEnabled     As Boolean               'TRUE when in-loop progress should be shown
+    Dim ProgressEvery       As Long                  'In-loop status-bar update frequency
+
     Const TotalSteps As Long = 6                     'Total number of timing methods
 
 '------------------------------------------------------------------------------
@@ -1065,7 +1110,20 @@ Public Sub cPM_RunAllMethods()
         Iterations = cPM_Demo_GetIterations()
     'Read the selected TW mode once
         TWMode = cPM_Demo_GetTWMode()
-    'Initialize progress
+
+'------------------------------------------------------------------------------
+' RESOLVE PROGRESS POLICY
+'------------------------------------------------------------------------------
+    'Enable in-loop progress only for sufficiently large iteration counts
+        ProgressEnabled = (Iterations >= 100)
+    'Resolve the in-loop update interval only when progress is enabled
+        If ProgressEnabled Then
+            ProgressEvery = Iterations \ 100
+            If ProgressEvery < 1 Then
+                ProgressEvery = 1
+            End If
+        End If
+    'Initialize method-level progress
         CurrentStep = 0
         Demo_SB_SetProgress CurrentStep, TotalSteps, "Preparing all-methods comparison"
 
@@ -1074,8 +1132,7 @@ Public Sub cPM_RunAllMethods()
 '------------------------------------------------------------------------------
     'Loop through all documented timing backends
         For MethodID = 1 To 6
-
-            'Advance progress and update the Excel status bar
+            'Advance method-level progress and update the Excel status bar
                 CurrentStep = CurrentStep + 1
                 Demo_SB_SetProgress CurrentStep, _
                                     TotalSteps, _
@@ -1083,35 +1140,39 @@ Public Sub cPM_RunAllMethods()
 
             'Create and configure a fresh timer instance for this method
                 Set cPM = cPM_Demo_PrepareInstance()
-
             'Apply the selected TW mode
                 cPM_Demo_ApplyTWMode cPM, TWMode
-
             'Clear the target range before the timed block
                 Target.ClearContents
-
+            'Write an initial in-loop status-bar message when enabled
+                If ProgressEnabled Then
+                    Demo_SB_SetProgress 0, Iterations, _
+                                        "Method " & CStr(MethodID) & " - " & cPM_Demo_MethodName(MethodID)
+                End If
             'Start the timing session
                 cPM.StartTimer MethodID, AlignFlag
-
             'Repeat the value-fill workload for the configured number of iterations
                 For i = 1 To Iterations
                     'Run the value-fill workload
                         Target.Value = FillValue
+                    'Update the status bar periodically during the timed loop when enabled
+                        If ProgressEnabled Then
+                            If (i = 1) Or ((i Mod ProgressEvery) = 0) Or (i = Iterations) Then
+                                Demo_SB_SetProgress i, Iterations, _
+                                                    "Method " & CStr(MethodID) & " - " & cPM_Demo_MethodName(MethodID)
+                            End If
+                        End If
                 Next i
-
             'Read numeric elapsed time
                 ElapsedS = cPM.ElapsedSeconds()
-
             'Read formatted elapsed time without taking a second timing sample
                 ElapsedTxt = cPM.ElapsedTime(, ElapsedS)
-
             'Build the scenario note text
                 Notes = "Rows=" & CStr(Target.Rows.Count) & _
                         " | Iterations=" & CStr(Iterations) & _
                         " | Align=" & CStr(AlignFlag) & _
                         " | FillValue=" & CStr(FillValue) & _
                         " | TW=" & TWMode
-
             'Append one result row for the current method
                 cPM_Demo_AppendLog "All Methods", _
                                    MethodID, _
@@ -1122,11 +1183,9 @@ Public Sub cPM_RunAllMethods()
                                    cPM.T2, _
                                    cPM.ET, _
                                    Notes
-
             'Release the current method instance cleanly before the next loop
                 cPM.ResetEnvironment
                 Set cPM = Nothing
-
         Next MethodID
 
 CleanExit:
@@ -1140,15 +1199,12 @@ CleanExit:
             Set cPM = Nothing
             On Error GoTo 0
         End If
-
     'Return control of the status bar to Excel
         Application.StatusBar = False
-
     'Re-raise the original error after cleanup when needed
         If SavedErrNumber <> 0 Then
             Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
         End If
-
     Exit Sub
 
 CleanFail:
@@ -1179,6 +1235,9 @@ Public Sub cPM_RunAlignedDemo()
 '     - once without alignment
 '     - once with alignment
 '
+'   This version also supports optional in-loop status-bar progress for both
+'   passes, enabled only when the iteration count is high enough to justify it
+'
 ' INPUTS
 '   None
 '
@@ -1190,7 +1249,10 @@ Public Sub cPM_RunAlignedDemo()
 '   - Resolves the configured value-fill target range
 '   - Reads the configured fill value
 '   - Reads the configured iteration count
+'   - Reads the selected TW mode once
 '   - Runs one non-aligned pass and one aligned pass
+'   - Updates the Excel status bar periodically inside each iterations loop
+'     only when Iterations >= 100
 '   - Appends one log row for each pass
 '
 ' ERROR POLICY
@@ -1203,12 +1265,20 @@ Public Sub cPM_RunAlignedDemo()
 '   - cPM_Demo_GetValueTargetRange
 '   - cPM_Demo_GetValueFillValue
 '   - cPM_Demo_GetIterations
-'   - cPM_Demo_ApplyTWMode
 '   - cPM_Demo_GetTWMode
+'   - cPM_Demo_ApplyTWMode
 '   - cPM_Demo_AppendLog
+'   - Demo_SB_SetProgress
+'   - cPM_Demo_MethodName
+'
+' NOTES
+'   Showing progress inside the timed loops adds UI overhead and therefore
+'   slightly contaminates the measurement. To reduce that effect:
+'     - progress is shown only when Iterations >= 100
+'     - the status bar is updated periodically rather than on every iteration
 '
 ' UPDATED
-'   2026-04-15
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1224,9 +1294,12 @@ Public Sub cPM_RunAlignedDemo()
     Dim Target              As Range                 'Worksheet target range
     Dim FillValue           As Variant               'Configured fill value
     Dim Iterations          As Long                  'Configured iteration count
+    Dim TWMode              As String                'Selected TW mode
     Dim i                   As Long                  'Loop counter
     Dim ElapsedS            As Double                'Measured elapsed seconds
     Dim ElapsedTxt          As String                'Formatted elapsed-time text
+    Dim ProgressEvery       As Long                  'Status-bar update frequency
+    Dim ProgressEnabled     As Boolean               'TRUE when in-loop progress should be shown
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -1243,14 +1316,35 @@ Public Sub cPM_RunAlignedDemo()
         FillValue = cPM_Demo_GetValueFillValue()
     'Read the configured iteration count
         Iterations = cPM_Demo_GetIterations()
+    'Read the selected TW mode once
+        TWMode = cPM_Demo_GetTWMode()
+
+'------------------------------------------------------------------------------
+' RESOLVE PROGRESS POLICY
+'------------------------------------------------------------------------------
+    'Enable in-loop progress only for sufficiently large iteration counts
+        ProgressEnabled = (Iterations >= 100)
+    'Resolve the status-bar update interval only when progress is enabled
+        If ProgressEnabled Then
+            ProgressEvery = Iterations \ 100
+            If ProgressEvery < 1 Then
+                ProgressEvery = 1
+            End If
+        End If
 
 '------------------------------------------------------------------------------
 ' RUN NON-ALIGNED PASS
 '------------------------------------------------------------------------------
+    'Write an initial status-bar message for the non-aligned pass when enabled
+        If ProgressEnabled Then
+            Demo_SB_SetProgress 0, Iterations, _
+                                "Aligned Demo - Non-Aligned Pass - " & cPM_Demo_MethodName(MethodID)
+        End If
+
     'Create and configure a timer instance for the non-aligned pass
         Set cPM = cPM_Demo_PrepareInstance()
     'Apply the selected TW mode
-        cPM_Demo_ApplyTWMode cPM, cPM_Demo_GetTWMode()
+        cPM_Demo_ApplyTWMode cPM, TWMode
     'Clear the target range before the timed block
         Target.ClearContents
     'Start the non-aligned timing session
@@ -1259,6 +1353,14 @@ Public Sub cPM_RunAlignedDemo()
         For i = 1 To Iterations
             'Run the value-fill workload
                 Target.Value = FillValue
+
+            'Update the status bar periodically during the timed loop when enabled
+                If ProgressEnabled Then
+                    If (i = 1) Or ((i Mod ProgressEvery) = 0) Or (i = Iterations) Then
+                        Demo_SB_SetProgress i, Iterations, _
+                                            "Aligned Demo - Non-Aligned Pass - " & cPM_Demo_MethodName(MethodID)
+                    End If
+                End If
         Next i
     'Read the non-aligned results
         ElapsedS = cPM.ElapsedSeconds()
@@ -1281,10 +1383,16 @@ Public Sub cPM_RunAlignedDemo()
 '------------------------------------------------------------------------------
 ' RUN ALIGNED PASS
 '------------------------------------------------------------------------------
+    'Write an initial status-bar message for the aligned pass when enabled
+        If ProgressEnabled Then
+            Demo_SB_SetProgress 0, Iterations, _
+                                "Aligned Demo - Aligned Pass - " & cPM_Demo_MethodName(MethodID)
+        End If
+
     'Create and configure a timer instance for the aligned pass
         Set cPM = cPM_Demo_PrepareInstance()
     'Apply the selected TW mode
-        cPM_Demo_ApplyTWMode cPM, cPM_Demo_GetTWMode()
+        cPM_Demo_ApplyTWMode cPM, TWMode
     'Clear the target range before the timed block
         Target.ClearContents
     'Start the aligned timing session
@@ -1293,6 +1401,14 @@ Public Sub cPM_RunAlignedDemo()
         For i = 1 To Iterations
             'Run the value-fill workload
                 Target.Value = FillValue
+
+            'Update the status bar periodically during the timed loop when enabled
+                If ProgressEnabled Then
+                    If (i = 1) Or ((i Mod ProgressEvery) = 0) Or (i = Iterations) Then
+                        Demo_SB_SetProgress i, Iterations, _
+                                            "Aligned Demo - Aligned Pass - " & cPM_Demo_MethodName(MethodID)
+                    End If
+                End If
         Next i
     'Read the aligned results
         ElapsedS = cPM.ElapsedSeconds()
@@ -1320,7 +1436,8 @@ CleanExit:
             Set cPM = Nothing
             On Error GoTo 0
         End If
-
+    'Return control of the status bar to Excel
+        Application.StatusBar = False
     'Re-raise the original error after cleanup when needed
         If SavedErrNumber <> 0 Then
             Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
@@ -1336,13 +1453,10 @@ CleanFail:
         SavedErrNumber = Err.Number
         SavedErrSource = Err.Source
         SavedErrDescription = Err.Description
-
     'Continue through the centralized cleanup path
         Resume CleanExit
 
 End Sub
-
-
 Public Sub cPM_RunDiagnostics()
 '
 '==============================================================================
@@ -1461,6 +1575,11 @@ Public Sub cPM_RunOverheadDemo()
 '   A benchmark result is easier to interpret when users can also inspect the
 '   approximate measurement overhead of the selected backend
 '
+'   This version assumes the corrected class design where:
+'     - OverheadMeasurement_Seconds performs the numeric measurement
+'     - OverheadMeasurement_Text can format an already measured overhead value
+'       without taking a second measurement
+'
 ' INPUTS
 '   None
 '
@@ -1470,7 +1589,9 @@ Public Sub cPM_RunOverheadDemo()
 ' BEHAVIOR
 '   - Reads the selected timing method
 '   - Reads the selected iteration count
-'   - Measures the timing overhead
+'   - Shows coarse stage progress in the status bar
+'   - Measures the numeric timing overhead once
+'   - Formats the text output from the same measured value
 '   - Appends one log row
 '
 ' ERROR POLICY
@@ -1482,9 +1603,14 @@ Public Sub cPM_RunOverheadDemo()
 '   - cPM_Demo_GetMethodID
 '   - cPM_Demo_GetIterations
 '   - cPM_Demo_AppendLog
+'   - Demo_SB_SetProgress
+'
+' NOTES
+'   No progress is shown inside the measured loop because that would distort the
+'   overhead measurement itself
 '
 ' UPDATED
-'   2026-04-15
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1501,6 +1627,9 @@ Public Sub cPM_RunOverheadDemo()
     Dim OverheadS           As Double                'Numeric overhead measurement
     Dim OverheadTxt         As String                'Formatted overhead text
 
+    Dim CurrentStep         As Long                  'Current stage progress step
+    Const TotalSteps As Long = 3                     'Total number of visible execution stages
+
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
@@ -1508,6 +1637,9 @@ Public Sub cPM_RunOverheadDemo()
         On Error GoTo CleanFail
     'Simulate a pressed button when the routine was launched by a shape
         Btn_Click
+    'Initialize stage progress
+        CurrentStep = 0
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "Preparing overhead demo"
     'Read the selected timing method
         MethodID = cPM_Demo_GetMethodID()
     'Read the selected iteration count
@@ -1516,13 +1648,26 @@ Public Sub cPM_RunOverheadDemo()
         Set cPM = cPM_Demo_PrepareInstance()
 
 '------------------------------------------------------------------------------
-' RUN DIAGNOSTIC
+' RUN NUMERIC MEASUREMENT
 '------------------------------------------------------------------------------
-    'Measure numeric timing overhead
+    'Advance progress before numeric overhead measurement
+        CurrentStep = 1
+        Demo_SB_SetProgress CurrentStep, _
+                            TotalSteps, _
+                            "Measuring numeric overhead - " & cPM.MethodName(MethodID)
+    'Measure numeric timing overhead once
         OverheadS = cPM.OverheadMeasurement_Seconds(MethodID, Iterations)
 
-    'Read formatted timing overhead
-        OverheadTxt = cPM.OverheadMeasurement_Text(MethodID)
+'------------------------------------------------------------------------------
+' FORMAT SAME MEASURED VALUE
+'------------------------------------------------------------------------------
+    'Advance progress before text formatting
+        CurrentStep = 2
+        Demo_SB_SetProgress CurrentStep, _
+                            TotalSteps, _
+                            "Formatting overhead result - " & cPM.MethodName(MethodID)
+    'Format the same measured numeric value without taking a second measurement
+        OverheadTxt = cPM.OverheadMeasurement_Text(MethodID, Iterations, OverheadS)
 
 '------------------------------------------------------------------------------
 ' LOG RESULT
@@ -1538,6 +1683,12 @@ Public Sub cPM_RunOverheadDemo()
                            0#, _
                            "Iterations=" & CStr(Iterations)
 
+    'Mark completion in the status bar
+        CurrentStep = 3
+        Demo_SB_SetProgress CurrentStep, _
+                            TotalSteps, _
+                            "Overhead demo complete - " & cPM.MethodName(MethodID)
+
 CleanExit:
 '------------------------------------------------------------------------------
 ' CLEANUP
@@ -1549,7 +1700,8 @@ CleanExit:
             Set cPM = Nothing
             On Error GoTo 0
         End If
-
+    'Return control of the status bar to Excel
+        Application.StatusBar = False
     'Re-raise the original error after cleanup when needed
         If SavedErrNumber <> 0 Then
             Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
@@ -1570,8 +1722,6 @@ CleanFail:
         Resume CleanExit
 
 End Sub
-
-
 Public Sub cPM_RunPauseDemo()
 '
 '==============================================================================
@@ -1584,6 +1734,9 @@ Public Sub cPM_RunPauseDemo()
 '   The demo workbook exposes pause controls separately from write / fill
 '   workloads so users can inspect pause behavior and overshoot more directly
 '
+'   This version also shows coarse progress in the Excel status bar across the
+'   main execution stages of the routine
+'
 ' INPUTS
 '   None
 '
@@ -1593,6 +1746,7 @@ Public Sub cPM_RunPauseDemo()
 ' BEHAVIOR
 '   - Reads the selected pause seconds and pause method
 '   - Uses QPC as the measurement backend
+'   - Shows stage-level progress in the status bar
 '   - Runs the selected pause scenario
 '   - Appends one log row
 '
@@ -1605,9 +1759,14 @@ Public Sub cPM_RunPauseDemo()
 '   - cPM_Demo_GetPauseSeconds
 '   - cPM_Demo_GetPauseMethod
 '   - cPM_Demo_AppendLog
+'   - Demo_SB_SetProgress
+'
+' NOTES
+'   This routine cannot show true live pause progress because the waiting logic
+'   runs inside cPM.Pause
 '
 ' UPDATED
-'   2026-04-15
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1624,36 +1783,49 @@ Public Sub cPM_RunPauseDemo()
     Dim ElapsedS            As Double                'Measured elapsed seconds
     Dim ElapsedTxt          As String                'Formatted elapsed text
 
+    Dim CurrentStep         As Long                  'Current stage progress step
+    Const TotalSteps As Long = 4                     'Total number of visible execution stages
+
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Enable structured cleanup on failure
         On Error GoTo CleanFail
-
     'Simulate a pressed button when the routine was launched by a shape
         Btn_Click
-
+    'Initialize stage progress
+        CurrentStep = 0
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "Preparing pause demo"
     'Read the selected pause seconds
         PauseS = cPM_Demo_GetPauseSeconds()
-
     'Read the selected pause method
         PauseMethod = cPM_Demo_GetPauseMethod()
-
     'Prepare a timer instance using QPC and current strict-mode setting
         Set cPM = cPM_Demo_PrepareInstance()
 
 '------------------------------------------------------------------------------
 ' RUN PAUSE
 '------------------------------------------------------------------------------
+    'Advance progress before starting the timing session
+        CurrentStep = 1
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "Starting QPC timing session"
     'Start a QPC timing session
         cPM.StartTimer 5, False
-
+    'Advance progress before running the pause scenario
+        CurrentStep = 2
+        Demo_SB_SetProgress CurrentStep, _
+                            TotalSteps, _
+                            "Running pause scenario - Method " & CStr(PauseMethod) & _
+                            " | PauseSeconds=" & CStr(PauseS)
     'Run the selected pause scenario
         cPM.Pause PauseS, PauseMethod
 
 '------------------------------------------------------------------------------
 ' READ RESULTS
 '------------------------------------------------------------------------------
+    'Advance progress before reading the results
+        CurrentStep = 3
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "Reading pause results"
     'Read numeric elapsed time
         ElapsedS = cPM.ElapsedSeconds()
     'Read formatted elapsed time without taking a second timing sample
@@ -1672,6 +1844,9 @@ Public Sub cPM_RunPauseDemo()
                            cPM.T2, _
                            cPM.ET, _
                            "PauseSeconds=" & CStr(PauseS) & " | PauseMethod=" & CStr(PauseMethod)
+    'Mark completion in the status bar
+        CurrentStep = 4
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "Pause demo complete"
 
 CleanExit:
 '------------------------------------------------------------------------------
@@ -1684,7 +1859,8 @@ CleanExit:
             Set cPM = Nothing
             On Error GoTo 0
         End If
-
+    'Return control of the status bar to Excel
+        Application.StatusBar = False
     'Re-raise the original error after cleanup when needed
         If SavedErrNumber <> 0 Then
             Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
@@ -1706,7 +1882,6 @@ CleanFail:
 
 End Sub
 
-
 Public Sub cPM_RunTWComparison()
 '
 '==============================================================================
@@ -1722,6 +1897,10 @@ Public Sub cPM_RunTWComparison()
 '     - normal Excel environment
 '     - selected Time-Wasters suppression mode
 '
+'   This version also supports optional in-loop progress in the Excel status
+'   bar for both passes, enabled only when the iteration count is high enough
+'   to justify it
+'
 ' INPUTS
 '   None
 '
@@ -1734,6 +1913,8 @@ Public Sub cPM_RunTWComparison()
 '   - Reads the configured formula text
 '   - Reads the configured iteration count
 '   - Runs one normal pass and one TW-managed pass
+'   - Updates the status bar periodically inside each iterations loop only when
+'     Iterations >= 100
 '   - Appends one structured log row for each pass
 '
 ' ERROR POLICY
@@ -1751,6 +1932,8 @@ Public Sub cPM_RunTWComparison()
 '   - cPM_Demo_GetIterations
 '   - cPM_Demo_ApplyTWMode
 '   - cPM_Demo_AppendLog
+'   - Demo_SB_SetProgress
+'   - cPM_Demo_MethodName
 '
 ' NOTES
 '   The configured formula text is expected to be stored in invariant Excel /
@@ -1764,8 +1947,13 @@ Public Sub cPM_RunTWComparison()
 '   and therefore does not expect localized function names or locale-specific
 '   list separators in the configured formula text
 '
+'   Showing progress inside the timed loops adds UI overhead and therefore
+'   slightly contaminates the measurement. To reduce that effect:
+'     - in-loop progress is shown only when Iterations >= 100
+'     - the status bar is updated periodically rather than on every iteration
+'
 ' UPDATED
-'   2026-04-18
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1781,6 +1969,8 @@ Public Sub cPM_RunTWComparison()
     Dim i                   As Long                  'Loop counter
     Dim ElapsedS            As Double                'Measured elapsed seconds
     Dim ElapsedTxt          As String                'Formatted elapsed text
+    Dim ProgressEnabled     As Boolean               'TRUE when in-loop progress should be shown
+    Dim ProgressEvery       As Long                  'Status-bar update frequency
 
     Dim SavedErrNumber      As Long                  'Captured error number
     Dim SavedErrSource      As String                'Captured error source
@@ -1807,8 +1997,27 @@ Public Sub cPM_RunTWComparison()
         Iterations = cPM_Demo_GetIterations()
 
 '------------------------------------------------------------------------------
+' RESOLVE PROGRESS POLICY
+'------------------------------------------------------------------------------
+    'Enable in-loop progress only for sufficiently large iteration counts
+        ProgressEnabled = (Iterations >= 100)
+    'Resolve the in-loop update interval only when progress is enabled
+        If ProgressEnabled Then
+            ProgressEvery = Iterations \ 100
+            If ProgressEvery < 1 Then
+                ProgressEvery = 1
+            End If
+        End If
+
+'------------------------------------------------------------------------------
 ' RUN NORMAL PASS
 '------------------------------------------------------------------------------
+    'Write an initial status-bar message for the normal pass when enabled
+        If ProgressEnabled Then
+            Demo_SB_SetProgress 0, Iterations, _
+                                "TW Comparison - Normal Pass - " & cPM_Demo_MethodName(MethodID)
+        End If
+
     'Create and configure a timer instance for the normal pass
         Set cPM = cPM_Demo_PrepareInstance()
     'Clear the target range before the timed block
@@ -1819,6 +2028,13 @@ Public Sub cPM_RunTWComparison()
         For i = 1 To Iterations
             'Apply the configured invariant formula text to the target range
                 Target.Formula = FormulaText
+            'Update the status bar periodically during the timed loop when enabled
+                If ProgressEnabled Then
+                    If (i = 1) Or ((i Mod ProgressEvery) = 0) Or (i = Iterations) Then
+                        Demo_SB_SetProgress i, Iterations, _
+                                            "TW Comparison - Normal Pass - " & cPM_Demo_MethodName(MethodID)
+                    End If
+                End If
         Next i
     'Read the normal-pass results
         ElapsedS = cPM.ElapsedSeconds()
@@ -1845,6 +2061,12 @@ Public Sub cPM_RunTWComparison()
 '------------------------------------------------------------------------------
 ' RUN TW PASS
 '------------------------------------------------------------------------------
+    'Write an initial status-bar message for the TW pass when enabled
+        If ProgressEnabled Then
+            Demo_SB_SetProgress 0, Iterations, _
+                                "TW Comparison - TW Pass - " & cPM_Demo_MethodName(MethodID)
+        End If
+
     'Create and configure a timer instance for the TW pass
         Set cPM = cPM_Demo_PrepareInstance()
     'Apply the selected TW mode
@@ -1857,6 +2079,13 @@ Public Sub cPM_RunTWComparison()
         For i = 1 To Iterations
             'Apply the configured invariant formula text to the target range
                 Target.Formula = FormulaText
+            'Update the status bar periodically during the timed loop when enabled
+                If ProgressEnabled Then
+                    If (i = 1) Or ((i Mod ProgressEvery) = 0) Or (i = Iterations) Then
+                        Demo_SB_SetProgress i, Iterations, _
+                                            "TW Comparison - TW Pass - " & cPM_Demo_MethodName(MethodID)
+                    End If
+                End If
         Next i
     'Read the TW-pass results
         ElapsedS = cPM.ElapsedSeconds()
@@ -1888,6 +2117,8 @@ CleanExit:
             Set cPM = Nothing
             On Error GoTo 0
         End If
+    'Return control of the status bar to Excel
+        Application.StatusBar = False
     'Re-raise the original error after cleanup when needed
         If SavedErrNumber <> 0 Then
             Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
@@ -1907,8 +2138,6 @@ CleanFail:
         Resume CleanExit
 
 End Sub
-
-
 
 Public Sub cPM_ClearResultsLog()
 '
