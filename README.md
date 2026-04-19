@@ -463,11 +463,17 @@ cPM.TW_Turn_OFF TW_Enum.ScreenUpdating Or TW_Enum.EnableEvents
 
 - Import `examples/M_cPM_USAGE_EXAMPLES.bas` for compact usage examples
 - Import `examples/M_cPM_DEMO.bas` and `examples/M_DEMO_BUILDER.bas` for the interactive demo workbook surface
+
+<img width="1917" height="915" alt="cPM Demo Control Panel" src="https://github.com/user-attachments/assets/efb40917-51d5-4494-87a5-bcd8fb2c97da" />
+
+
 - Import `test/M_cPM_TEST.bas` and run:
 
 ```vb
 Run_cPerformanceManager_RegressionSuite
 ```
+
+<img width="1918" height="919" alt="cPM Test Results" src="https://github.com/user-attachments/assets/876bfa0d-c678-45a7-a925-80ec76febefb" />
 
 The regression suite covers:
 
@@ -509,3 +515,9 @@ For additional examples, notes, and repository-level guidance, see the project w
 ## License
 
 This project is licensed under the terms in `LICENSE`.
+
+---
+
+## Author
+
+Daniele Penza
