@@ -191,7 +191,7 @@ Public Sub cPM_CreateDemoSheets()
         DEMO_Build_DemoTemplate _
             cPM_SHEET_DEMO, _
             cPM_DEMO_TITLE, _
-            cPM_SUBTITLE_DEMO
+            cPM_SUBTITLE_DEMO, , 17
     'Build or rebuild the generic template for the data sheet
         DEMO_Build_DemoTemplate _
             cPM_SHEET_DATA, _
@@ -308,7 +308,7 @@ Private Sub cPM_BuildDemoSheet( _
 ' ADJUST COLUMNS
 '------------------------------------------------------------------------------
     'Adjust the main visible columns for the demo sheet layout
-        WS.Columns("C:N").ColumnWidth = 18
+        WS.Columns("C:M").ColumnWidth = 18
     'Widen the elapsed-time text column
         WS.Columns("I").ColumnWidth = 50
     'Widen the notes column
@@ -466,7 +466,7 @@ Private Sub cPM_BuildDemoSheet( _
     ' CREATE REGRESSION TEST BUTTON
     '--------------------------------------------------------------------------
         DEMO_Add_DemoButton WS, "Btn_cPM_Regression", "Run Regression Tests", _
-            WS.Range("I8").Left, WS.Range("I8").Top + 10, _
+            WS.Range("M8").Left + 40, WS.Range("I8").Top + 10, _
             135, 25, "Run_cPerformanceManager_RegressionSuite"
     
 '------------------------------------------------------------------------------
@@ -1000,7 +1000,9 @@ Public Sub cPM_RunAllMethods()
 '   - Resolves the configured value-fill target range once
 '   - Reads the configured fill value once
 '   - Reads the configured iteration count once
+'   - Reads the selected TW mode once
 '   - Loops through timing methods 1 to 6
+'   - Updates the Excel status bar with progress during execution
 '   - Executes the timed workload repeatedly for each method
 '   - Appends one log row per method
 '
@@ -1014,12 +1016,13 @@ Public Sub cPM_RunAllMethods()
 '   - cPM_Demo_GetValueTargetRange
 '   - cPM_Demo_GetValueFillValue
 '   - cPM_Demo_GetIterations
-'   - cPM_Demo_ApplyTWMode
 '   - cPM_Demo_GetTWMode
+'   - cPM_Demo_ApplyTWMode
 '   - cPM_Demo_AppendLog
+'   - Demo_SB_SetProgress
 '
 ' UPDATED
-'   2026-04-15
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1030,16 +1033,20 @@ Public Sub cPM_RunAllMethods()
     Dim SavedErrNumber      As Long                  'Captured error number
     Dim SavedErrSource      As String                'Captured error source
     Dim SavedErrDescription As String                'Captured error description
-    
+
     Dim MethodID            As Integer               'Looped timing method
     Dim AlignFlag           As Boolean               'Selected alignment flag
     Dim Target              As Range                 'Worksheet target range
     Dim FillValue           As Variant               'Configured fill value
     Dim Iterations          As Long                  'Configured iteration count
+    Dim TWMode              As String                'Selected TW mode
     Dim i                   As Long                  'Workload loop counter
     Dim ElapsedS            As Double                'Measured elapsed seconds
     Dim ElapsedTxt          As String                'Formatted elapsed-time text
     Dim Notes               As String                'Scenario note text
+
+    Dim CurrentStep         As Long                  'Current progress step
+    Const TotalSteps As Long = 6                     'Total number of timing methods
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -1056,36 +1063,55 @@ Public Sub cPM_RunAllMethods()
         FillValue = cPM_Demo_GetValueFillValue()
     'Read the configured iteration count once
         Iterations = cPM_Demo_GetIterations()
+    'Read the selected TW mode once
+        TWMode = cPM_Demo_GetTWMode()
+    'Initialize progress
+        CurrentStep = 0
+        Demo_SB_SetProgress CurrentStep, TotalSteps, "Preparing all-methods comparison"
 
 '------------------------------------------------------------------------------
 ' RUN WORKLOADS
 '------------------------------------------------------------------------------
     'Loop through all documented timing backends
         For MethodID = 1 To 6
-           
+
+            'Advance progress and update the Excel status bar
+                CurrentStep = CurrentStep + 1
+                Demo_SB_SetProgress CurrentStep, _
+                                    TotalSteps, _
+                                    "Running method " & CStr(MethodID) & " - " & cPM_Demo_MethodName(MethodID)
+
             'Create and configure a fresh timer instance for this method
                 Set cPM = cPM_Demo_PrepareInstance()
+
             'Apply the selected TW mode
-                cPM_Demo_ApplyTWMode cPM, cPM_Demo_GetTWMode()
+                cPM_Demo_ApplyTWMode cPM, TWMode
+
             'Clear the target range before the timed block
                 Target.ClearContents
+
             'Start the timing session
                 cPM.StartTimer MethodID, AlignFlag
+
             'Repeat the value-fill workload for the configured number of iterations
                 For i = 1 To Iterations
                     'Run the value-fill workload
                         Target.Value = FillValue
                 Next i
+
             'Read numeric elapsed time
                 ElapsedS = cPM.ElapsedSeconds()
+
             'Read formatted elapsed time without taking a second timing sample
                 ElapsedTxt = cPM.ElapsedTime(, ElapsedS)
+
             'Build the scenario note text
                 Notes = "Rows=" & CStr(Target.Rows.Count) & _
                         " | Iterations=" & CStr(Iterations) & _
                         " | Align=" & CStr(AlignFlag) & _
                         " | FillValue=" & CStr(FillValue) & _
-                        " | TW=" & cPM_Demo_GetTWMode()
+                        " | TW=" & TWMode
+
             'Append one result row for the current method
                 cPM_Demo_AppendLog "All Methods", _
                                    MethodID, _
@@ -1096,10 +1122,11 @@ Public Sub cPM_RunAllMethods()
                                    cPM.T2, _
                                    cPM.ET, _
                                    Notes
+
             'Release the current method instance cleanly before the next loop
                 cPM.ResetEnvironment
                 Set cPM = Nothing
-        
+
         Next MethodID
 
 CleanExit:
@@ -1113,6 +1140,10 @@ CleanExit:
             Set cPM = Nothing
             On Error GoTo 0
         End If
+
+    'Return control of the status bar to Excel
+        Application.StatusBar = False
+
     'Re-raise the original error after cleanup when needed
         If SavedErrNumber <> 0 Then
             Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
@@ -1128,12 +1159,11 @@ CleanFail:
         SavedErrNumber = Err.Number
         SavedErrSource = Err.Source
         SavedErrDescription = Err.Description
+
     'Continue through the centralized cleanup path
         Resume CleanExit
 
 End Sub
-
-
 Public Sub cPM_RunAlignedDemo()
 '
 '==============================================================================
@@ -1952,6 +1982,55 @@ End Sub
 '==============================================================================
 '                  PRIVATE: DEMO INSTANCE / CONTROL READERS
 '==============================================================================
+
+Private Function cPM_Demo_MethodName( _
+    ByVal MethodID As Integer) _
+    As String
+'
+'==============================================================================
+'                           DEMO METHOD NAME
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns the display name of one timing method for demo/status-bar use
+'
+' WHY THIS EXISTS
+'   Some demo/status-bar messages need a method label before a timer instance
+'   has been created for the current loop iteration
+'
+' INPUTS
+'   MethodID
+'     Timing backend identifier
+'
+' RETURNS
+'   String
+'     Human-readable method label, or vbNullString when the ID is invalid
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' ASSIGN RESULT
+'------------------------------------------------------------------------------
+    'Return the human-readable method label
+        Select Case MethodID
+            Case 1
+                cPM_Demo_MethodName = "Timer"
+            Case 2
+                cPM_Demo_MethodName = "GetTickCount / GetTickCount64"
+            Case 3
+                cPM_Demo_MethodName = "timeGetTime"
+            Case 4
+                cPM_Demo_MethodName = "timeGetSystemTime"
+            Case 5
+                cPM_Demo_MethodName = "QPC"
+            Case 6
+                cPM_Demo_MethodName = "Now()"
+            Case Else
+                cPM_Demo_MethodName = vbNullString
+        End Select
+
+End Function
 
 Private Function cPM_Demo_PrepareInstance() As cPerformanceManager
 '
