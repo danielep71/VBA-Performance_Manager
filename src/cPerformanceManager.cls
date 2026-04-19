@@ -1389,7 +1389,8 @@ End Function
 
 Public Property Get OverheadMeasurement_Text( _
     Optional ByVal iMethod As Integer = 5, _
-    Optional ByVal Iterations As Long = 1000) _
+    Optional ByVal Iterations As Long = 1000, _
+    Optional ByVal OverheadSecondsIn As Variant) _
     As String
 '
 '==============================================================================
@@ -1405,6 +1406,9 @@ Public Property Get OverheadMeasurement_Text( _
 '   This property exists as the presentation-oriented companion for diagnostics,
 '   logs, and quick inspection
 '
+'   When an already measured overhead value is supplied, this routine formats
+'   that value directly without taking a second measurement
+'
 ' INPUTS
 '   iMethod (optional)
 '     Timing backend whose near-empty average measurement overhead should be
@@ -1414,14 +1418,17 @@ Public Property Get OverheadMeasurement_Text( _
 '     Number of near-empty timing cycles to average
 '     Values less than 1 are coerced to 1 by OverheadMeasurement_Seconds()
 '
+'   OverheadSecondsIn (optional)
+'     Optional already measured overhead value to format directly
+'
 ' RETURNS
 '   String
 '     A human-readable measurement-overhead report
 '
 ' BEHAVIOR
 '   - Normalizes and validates the requested timer method
-'   - Calls OverheadMeasurement_Seconds() using the requested backend and
-'     iteration count
+'   - If OverheadSecondsIn is omitted, measures average near-empty overhead
+'   - If OverheadSecondsIn is supplied, formats that value directly
 '   - Returns a readable string containing the backend name and average
 '     measurement overhead in seconds
 '
@@ -1434,14 +1441,12 @@ Public Property Get OverheadMeasurement_Text( _
 '   - MethodName
 '
 ' NOTES
-'   - This property is diagnostic/reporting-oriented
-'   - It is intentionally separate from OverheadMeasurement_Seconds(), which
-'     should remain the machine-readable API for programmatic use
-'   - Defaulting to method 5 (QPC) is appropriate here because this routine is
-'     backend-diagnostic rather than session-bound
+'   This property mirrors the design of ElapsedTime:
+'     - measure when no numeric value is supplied
+'     - format directly when a numeric value is supplied
 '
 ' UPDATED
-'   2026-04-15
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1455,8 +1460,17 @@ Public Property Get OverheadMeasurement_Text( _
 '------------------------------------------------------------------------------
     'Normalize and validate the timer method
         ResolvedMethod = Method_NormalizeStart(iMethod)
-    'Measure average near-empty overhead
-        AvgS = OverheadMeasurement_Seconds(ResolvedMethod, Iterations)
+
+'------------------------------------------------------------------------------
+' RESOLVE NUMERIC OVERHEAD VALUE
+'------------------------------------------------------------------------------
+    'Use the supplied numeric overhead value when provided
+        If Not IsMissing(OverheadSecondsIn) Then
+            AvgS = CDbl(OverheadSecondsIn)
+    'Otherwise measure average near-empty overhead now
+        Else
+            AvgS = OverheadMeasurement_Seconds(ResolvedMethod, Iterations)
+        End If
 
 '------------------------------------------------------------------------------
 ' ASSIGN RESULT
@@ -1465,8 +1479,8 @@ Public Property Get OverheadMeasurement_Text( _
         OverheadMeasurement_Text = "Average measurement overhead - " & _
                                    MethodName(ResolvedMethod) & " - " & _
                                    Format$(AvgS, "0.000000000") & " seconds"
-End Property
 
+End Property
 Public Property Get Get_SystemTickInterval() As String
 '
 '==============================================================================
