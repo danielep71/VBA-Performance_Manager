@@ -155,110 +155,58 @@ Public Sub DEMO_Build_DemoTemplate( _
 '
 ' WHY THIS EXISTS
 '   Demo sheets should start from a consistent visual and structural baseline.
-'   This routine centralizes that setup so callers do not need to repeat:
-'     - worksheet retrieval / creation
-'     - sheet reset
-'     - title / subtitle band creation
-'     - base font / alignment formatting
-'     - configurable column / row sizing
-'     - optional hiding of trailing rows / columns
-'     - optional restriction of the worksheet scroll area
-'     - lightweight window / view normalization when feasible
+'   This routine centralizes worksheet retrieval, reset, title/subtitle band
+'   creation, base formatting, configurable sizing, and view normalization
 '
 ' INPUTS
 '   WS_Name
 '     Name of the worksheet to create or rebuild
 '
-'   Title (optional)
-'     Main title to write in the title band
+'   Title / SubTitle (optional)
+'     Main title and subtitle for the header bands
 '
-'   SubTitle (optional)
-'     Subtitle to write in the subtitle band
-'
-'   IsFrozenPane (optional)
-'     TRUE  => freeze panes at FreezeAtRow when feasible
-'     FALSE => leave panes unfrozen
-'
-'   FreezeAtRow (optional)
-'     First visible row below the frozen pane split
-'     Example:
-'       3 => rows 1:2 remain frozen
+'   IsFrozenPane / FreezeAtRow (optional)
+'     Freeze-pane behavior
 '
 '   TargetWorkbook (optional)
 '     Workbook to build into
 '     When omitted, defaults to ThisWorkbook
 '
-'   LeftMarginColumns (optional)
-'     Column address for left-margin columns
+'   LeftMarginColumns / LeftMarginColumnWidth (optional)
+'     Left-margin column block and width
 '
-'   LeftMarginColumnWidth (optional)
-'     Width applied to LeftMarginColumns
-'
-'   ContentColumns (optional)
-'     Column address for the main content block
-'
-'   ContentColumnWidth (optional)
-'     Width applied to ContentColumns
+'   ContentColumns / ContentColumnWidth (optional)
+'     Main content block and width
 '
 '   SeparatorColumns (optional)
-'     Column address for separator columns
+'     Retained for backward compatibility
+'     The effective separator column is derived automatically as the next
+'     column after ContentColumns
 '
 '   SeparatorColumnWidth (optional)
-'     Width applied to SeparatorColumns
+'     Width applied to the derived separator column
 '
-'   TitleRowHeight (optional)
-'     Height applied to row 1
+'   TitleRowHeight / SubTitleRowHeight (optional)
+'     Heights for rows 1 and 2
 '
-'   SubTitleRowHeight (optional)
-'     Height applied to row 2
-'
-'   BodyRowFrom / BodyRowTo (optional)
-'     Inclusive row range receiving the standard body-row height
-'
-'   BodyRowHeight (optional)
-'     Height applied to the configured body-row range
+'   BodyRowFrom / BodyRowTo / BodyRowHeight (optional)
+'     Body-row range and applied height
 '
 '   HideColumnsFrom (optional)
-'     First column to hide through the final worksheet column
-'
-'     Examples:
-'       "N"   => hide columns N:XFD
-'       "XFD" => do not hide any columns
+'     Retained for backward compatibility
+'     The effective first hidden column is derived automatically as the column
+'     after the derived separator column
 '
 '   HideRowsFrom (optional)
 '     First row to hide through the final worksheet row
-'
-'     Examples:
-'       1001    => hide rows 1001:1048576
-'       1048576 => do not hide any rows
 '
 '   RestrictScrollAreaToVisible (optional)
 '     TRUE  => restrict worksheet scroll area to the visible block
 '     FALSE => leave worksheet scroll area unrestricted
 '
-'   HideGridlines (optional)
-'     TRUE  => hide gridlines in the active window
-'     FALSE => show gridlines in the active window
-'
-'   ShowHeadings (optional)
-'     TRUE  => show row/column headings in the active window
-'     FALSE => hide row/column headings in the active window
-'
-'   ShowFormulaBar (optional)
-'     TRUE  => show the Excel formula bar
-'     FALSE => hide the Excel formula bar
-'
-'   ShowHorizontalScrollBar (optional)
-'     TRUE  => show the horizontal scroll bar in the active window
-'     FALSE => hide the horizontal scroll bar in the active window
-'
-'   ShowVerticalScrollBar (optional)
-'     TRUE  => show the vertical scroll bar in the active window
-'     FALSE => hide the vertical scroll bar in the active window
-'
-'   ZoomPercent (optional)
-'     Active-window zoom percentage
-'     0 => leave unchanged
+'   HideGridlines / ShowHeadings / ShowFormulaBar / ShowHorizontalScrollBar /
+'   ShowVerticalScrollBar / ZoomPercent (optional)
+'     View settings applied only when the target workbook is active
 '
 ' RETURNS
 '   None
@@ -267,14 +215,10 @@ Public Sub DEMO_Build_DemoTemplate( _
 '   - Uses the requested workbook or defaults to ThisWorkbook
 '   - Gets or creates the requested worksheet
 '   - Resets the sheet before rebuilding it
-'   - Applies base sheet formatting
-'   - Applies configurable column / row layout
-'   - Writes and formats the title and subtitle bands without merged cells
-'   - Optionally hides rows and columns from the requested starting point to
-'     the end of the worksheet
-'   - Optionally restricts the worksheet scroll area to the visible block
-'   - Applies gridline, heading, scroll-bar, zoom, and freeze-pane settings
-'     only when the target workbook is active in the current window
+'   - Derives the separator column from ContentColumns
+'   - Derives the first hidden column from the separator column
+'   - Writes title/subtitle bands from column B to the last content column
+'   - Applies configurable row/column sizing and view normalization
 '
 ' ERROR POLICY
 '   Raises errors normally
@@ -283,34 +227,48 @@ Public Sub DEMO_Build_DemoTemplate( _
 '   - DEMO_GetOrCreateSheet
 '   - DEMO_Reset_Sheet
 '   - DEMO_Write_BandHeader
+'   - DEMO_ColumnLetter
 '
 ' NOTES
-'   - Gridlines, headings, scroll bars, zoom, and freeze panes are window-level
-'     behaviors in Excel
-'   - ScrollArea is a worksheet-level property
-'   - Therefore window settings can only be applied safely through the active
-'     window, while ScrollArea can be applied directly to the worksheet
+'   - Window-level settings can only be applied safely through the active window
+'   - SeparatorColumns and HideColumnsFrom are retained in the signature only
+'     for backward compatibility
 '
 ' UPDATED
-'   2026-04-15
+'   2026-04-18
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WB                  As Workbook       'Target workbook
-    Dim WS                  As Worksheet      'Target worksheet
-    
-    Dim MaxRow              As Long           'Last worksheet row
-    Dim MaxCol              As Long           'Last worksheet column
-    Dim HideFromColIndex    As Long           'Resolved starting hidden column index
-    Dim LastVisibleRow      As Long           'Last visible worksheet row
-    Dim LastVisibleCol      As Long           'Last visible worksheet column
-    Dim ScrollAreaAddress   As String         'Resolved worksheet ScrollArea text
-    
-    Dim SavedErrNum         As Long           'Captured error number
-    Dim SavedErrSrc         As String         'Captured error source
-    Dim SavedErrDesc        As String         'Captured error description
+    Dim WB                          As Workbook       'Target workbook
+    Dim WS                          As Worksheet      'Target worksheet
+
+    Dim MaxRow                      As Long           'Last worksheet row
+    Dim MaxCol                      As Long           'Last worksheet column
+
+    Dim ContentParts                As Variant        'Split ContentColumns parts
+    Dim ContentText                 As String         'Trimmed ContentColumns text
+    Dim ContentFirstColIndex        As Long           'Resolved first content-column index
+    Dim ContentLastColIndex         As Long           'Resolved last content-column index
+
+    Dim EffectiveSeparatorColIndex  As Long           'Derived separator-column index
+    Dim EffectiveHideFromColIndex   As Long           'Derived first hidden-column index
+    Dim EffectiveSeparatorColumns   As String         'Derived separator-column address
+    Dim EffectiveHideColumnsFrom    As String         'Derived first hidden-column text
+
+    Dim LastVisibleRow              As Long           'Last visible worksheet row
+    Dim LastVisibleCol              As Long           'Last visible worksheet column
+    Dim ScrollAreaAddress           As String         'Resolved worksheet ScrollArea text
+
+    Dim TitleBandRange              As Range          'Resolved title-band range
+    Dim SubTitleBandRange           As Range          'Resolved subtitle-band range
+
+    Dim TmpColIndex                 As Long           'Temporary column index for normalization
+
+    Dim SavedErrNum                 As Long           'Captured error number
+    Dim SavedErrSrc                 As String         'Captured error source
+    Dim SavedErrDesc                As String         'Captured error description
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -321,7 +279,7 @@ Public Sub DEMO_Build_DemoTemplate( _
                       "M_DEMO_BUILDER.DEMO_Build_DemoTemplate", _
                       "Worksheet name cannot be blank."
         End If
-    
+
     'Reject invalid freeze-row requests when pane freezing is enabled
         If IsFrozenPane Then
             If FreezeAtRow < 2 Then
@@ -330,14 +288,14 @@ Public Sub DEMO_Build_DemoTemplate( _
                           "FreezeAtRow must be >= 2 when IsFrozenPane = True."
             End If
         End If
-    
+
     'Reject invalid body-row ranges
         If BodyRowFrom < 1 Or BodyRowTo < BodyRowFrom Then
             Err.Raise vbObjectError + 2014, _
                       "M_DEMO_BUILDER.DEMO_Build_DemoTemplate", _
                       "Invalid body-row range."
         End If
-    
+
     'Reject invalid width settings
         If LeftMarginColumnWidth <= 0# Or _
            ContentColumnWidth <= 0# Or _
@@ -346,7 +304,7 @@ Public Sub DEMO_Build_DemoTemplate( _
                       "M_DEMO_BUILDER.DEMO_Build_DemoTemplate", _
                       "Column widths must be positive."
         End If
-    
+
     'Reject invalid row-height settings
         If TitleRowHeight <= 0# Or _
            SubTitleRowHeight <= 0# Or _
@@ -355,7 +313,7 @@ Public Sub DEMO_Build_DemoTemplate( _
                       "M_DEMO_BUILDER.DEMO_Build_DemoTemplate", _
                       "Row heights must be positive."
         End If
-    
+
     'Reject invalid zoom values when explicitly provided
         If ZoomPercent <> 0 Then
             If ZoomPercent < 10 Or ZoomPercent > 400 Then
@@ -370,12 +328,13 @@ Public Sub DEMO_Build_DemoTemplate( _
 '------------------------------------------------------------------------------
     'Enable structured cleanup on failure
         On Error GoTo CleanFail
+
     'Use the requested workbook when supplied; otherwise default to ThisWorkbook
         If IsMissing(TargetWorkbook) Or IsEmpty(TargetWorkbook) Then
             Set WB = ThisWorkbook
         ElseIf IsObject(TargetWorkbook) Then
             Set WB = TargetWorkbook
-            
+
             If WB Is Nothing Then
                 Set WB = ThisWorkbook
             End If
@@ -390,6 +349,7 @@ Public Sub DEMO_Build_DemoTemplate( _
 '------------------------------------------------------------------------------
     'Get or create the target worksheet
         Set WS = DEMO_GetOrCreateSheet(WB, WS_Name)
+
     'Reset the worksheet to a clean reusable state before rebuilding it
         DEMO_Reset_Sheet WS
 
@@ -398,29 +358,88 @@ Public Sub DEMO_Build_DemoTemplate( _
 '------------------------------------------------------------------------------
     'Capture the last available worksheet row
         MaxRow = WS.Rows.Count
+
     'Capture the last available worksheet column
         MaxCol = WS.Columns.Count
-        
+
 '------------------------------------------------------------------------------
-' VALIDATE / RESOLVE HIDE STARTS
+' RESOLVE CONTENT COLUMN BLOCK
 '------------------------------------------------------------------------------
-    'Resolve the starting hidden column index
-        If Len(Trim$(HideColumnsFrom)) = 0 Then
-            HideFromColIndex = MaxCol
-        Else
-            HideFromColIndex = WS.Range(Trim$(HideColumnsFrom) & "1").Column
+    'Resolve the trimmed content-column specification
+        ContentText = Trim$(ContentColumns)
+
+    'Reject a blank content-column specification
+        If Len(ContentText) = 0 Then
+            Err.Raise vbObjectError + 2021, _
+                      "M_DEMO_BUILDER.DEMO_Build_DemoTemplate", _
+                      "ContentColumns cannot be blank."
         End If
+
+    'Split the content-column specification
+        ContentParts = Split(ContentText, ":")
+
+    'Resolve the content-column range when a single column was supplied
+        If UBound(ContentParts) = 0 Then
+            ContentFirstColIndex = WS.Range(Trim$(ContentParts(0)) & "1").Column
+            ContentLastColIndex = ContentFirstColIndex
+
+    'Resolve the content-column range when a standard two-part range was supplied
+        ElseIf UBound(ContentParts) = 1 Then
+            ContentFirstColIndex = WS.Range(Trim$(ContentParts(0)) & "1").Column
+            ContentLastColIndex = WS.Range(Trim$(ContentParts(1)) & "1").Column
+
+    'Reject invalid multi-part content-column specifications
+        Else
+            Err.Raise vbObjectError + 2022, _
+                      "M_DEMO_BUILDER.DEMO_Build_DemoTemplate", _
+                      "ContentColumns must resolve to one column or one contiguous column range."
+        End If
+
+    'Normalize reversed content-column specifications
+        If ContentLastColIndex < ContentFirstColIndex Then
+            TmpColIndex = ContentFirstColIndex
+            ContentFirstColIndex = ContentLastColIndex
+            ContentLastColIndex = TmpColIndex
+        End If
+
+    'Reject content-column blocks that do not leave room for separator + hidden block
+        If ContentLastColIndex > MaxCol - 2 Then
+            Err.Raise vbObjectError + 2023, _
+                      "M_DEMO_BUILDER.DEMO_Build_DemoTemplate", _
+                      "ContentColumns must leave room for a separator column and at least one hidden trailing column."
+        End If
+
+    'Reject content-column blocks that end before column B
+        If ContentLastColIndex < 2 Then
+            Err.Raise vbObjectError + 2024, _
+                      "M_DEMO_BUILDER.DEMO_Build_DemoTemplate", _
+                      "ContentColumns must extend at least through column B."
+        End If
+
+'------------------------------------------------------------------------------
+' DERIVE SEPARATOR / HIDDEN COLUMN LOGIC
+'------------------------------------------------------------------------------
+    'Derive the separator column as the next column after the content block
+        EffectiveSeparatorColIndex = ContentLastColIndex + 1
+
+    'Derive the first hidden column as the column after the separator
+        EffectiveHideFromColIndex = EffectiveSeparatorColIndex + 1
+
+    'Resolve the effective separator-column address
+        EffectiveSeparatorColumns = DEMO_ColumnLetter(EffectiveSeparatorColIndex) & ":" & _
+                                    DEMO_ColumnLetter(EffectiveSeparatorColIndex)
+
+    'Resolve the effective first hidden-column text
+        EffectiveHideColumnsFrom = DEMO_ColumnLetter(EffectiveHideFromColIndex)
+
+'------------------------------------------------------------------------------
+' VALIDATE ROW-HIDE REQUEST
+'------------------------------------------------------------------------------
     'Reject invalid row-hide requests
         If HideRowsFrom < 1 Or HideRowsFrom > MaxRow Then
             Err.Raise vbObjectError + 2019, _
                       "M_DEMO_BUILDER.DEMO_Build_DemoTemplate", _
                       "HideRowsFrom must be between 1 and the worksheet last row."
-        End If
-    'Reject invalid column-hide requests
-        If HideFromColIndex < 1 Or HideFromColIndex > MaxCol Then
-            Err.Raise vbObjectError + 2020, _
-                      "M_DEMO_BUILDER.DEMO_Build_DemoTemplate", _
-                      "HideColumnsFrom is invalid."
         End If
 
 '------------------------------------------------------------------------------
@@ -428,6 +447,7 @@ Public Sub DEMO_Build_DemoTemplate( _
 '------------------------------------------------------------------------------
     'Apply the standard tab color
         WS.Tab.Color = COLOR_SUBTITLE
+
     'Apply base cell formatting
         With WS.Cells
             .Interior.Pattern = xlNone
@@ -445,27 +465,37 @@ Public Sub DEMO_Build_DemoTemplate( _
         If Len(Trim$(LeftMarginColumns)) > 0 Then
             WS.Columns(LeftMarginColumns).ColumnWidth = LeftMarginColumnWidth
         End If
+
     'Apply the configured main content-block widths
-        If Len(Trim$(ContentColumns)) > 0 Then
-            WS.Columns(ContentColumns).ColumnWidth = ContentColumnWidth
-        End If
-    'Apply the configured separator-column widths
-        If Len(Trim$(SeparatorColumns)) > 0 Then
-            WS.Columns(SeparatorColumns).ColumnWidth = SeparatorColumnWidth
-        End If
+        WS.Columns(ContentColumns).ColumnWidth = ContentColumnWidth
+
+    'Apply the derived separator-column width
+        WS.Columns(EffectiveSeparatorColumns).ColumnWidth = SeparatorColumnWidth
+
     'Apply the configured title-row height
         WS.Rows(1).RowHeight = TitleRowHeight
+
     'Apply the configured subtitle-row height
         WS.Rows(2).RowHeight = SubTitleRowHeight
+
     'Apply the configured body-row height range
         WS.Rows(CStr(BodyRowFrom) & ":" & CStr(BodyRowTo)).RowHeight = BodyRowHeight
+
+'------------------------------------------------------------------------------
+' RESOLVE TITLE / SUBTITLE BANDS
+'------------------------------------------------------------------------------
+    'Resolve the title-band range from column B to the last content column
+        Set TitleBandRange = WS.Range("B1:" & DEMO_ColumnLetter(ContentLastColIndex) & "1")
+
+    'Resolve the subtitle-band range from column B to the last content column
+        Set SubTitleBandRange = WS.Range("B2:" & DEMO_ColumnLetter(ContentLastColIndex) & "2")
 
 '------------------------------------------------------------------------------
 ' FORMAT TITLE / SUBTITLE BANDS
 '------------------------------------------------------------------------------
     'Write and format the title band
         DEMO_Write_BandHeader _
-            TargetRange:=WS.Range("B1:M1"), _
+            TargetRange:=TitleBandRange, _
             HeaderText:=Title, _
             FillColor:=COLOR_TITLE, _
             FontColor:=RGB(255, 192, 0), _
@@ -473,10 +503,10 @@ Public Sub DEMO_Build_DemoTemplate( _
             IsBold:=True, _
             IsBorder:=True, _
             IsCentered:=False
-    
+
     'Write and format the subtitle band
         DEMO_Write_BandHeader _
-            TargetRange:=WS.Range("B2:M2"), _
+            TargetRange:=SubTitleBandRange, _
             HeaderText:=SubTitle, _
             FillColor:=COLOR_SUBTITLE, _
             FontColor:=RGB(255, 255, 255), _
@@ -492,10 +522,10 @@ Public Sub DEMO_Build_DemoTemplate( _
         If HideRowsFrom < MaxRow Then
             WS.Rows(CStr(HideRowsFrom) & ":" & CStr(MaxRow)).Hidden = True
         End If
-    
-    'Hide all columns from HideColumnsFrom to the final worksheet column when requested
-        If HideFromColIndex < MaxCol Then
-            WS.Range(WS.Columns(HideFromColIndex), WS.Columns(MaxCol)).EntireColumn.Hidden = True
+
+    'Hide all columns from the derived first hidden column to the final worksheet column
+        If EffectiveHideFromColIndex <= MaxCol Then
+            WS.Range(WS.Columns(EffectiveHideFromColIndex), WS.Columns(MaxCol)).EntireColumn.Hidden = True
         End If
 
 '------------------------------------------------------------------------------
@@ -507,14 +537,10 @@ Public Sub DEMO_Build_DemoTemplate( _
         Else
             LastVisibleRow = MaxRow
         End If
-    
+
     'Compute the last visible worksheet column
-        If HideFromColIndex < MaxCol Then
-            LastVisibleCol = HideFromColIndex - 1
-        Else
-            LastVisibleCol = MaxCol
-        End If
-    
+        LastVisibleCol = EffectiveHideFromColIndex - 1
+
     'Apply or clear the worksheet scroll area
         If RestrictScrollAreaToVisible Then
             ScrollAreaAddress = WS.Range(WS.Cells(1, 1), WS.Cells(LastVisibleRow, LastVisibleCol)).Address
@@ -528,24 +554,24 @@ Public Sub DEMO_Build_DemoTemplate( _
 '------------------------------------------------------------------------------
     'Apply window-level view settings only when the target workbook is active
         If WB Is ActiveWorkbook Then
-            
+
             'Activate the target sheet in the current window
                 WS.Activate
-            
+
             'Apply active-window and application-level view settings
                 With ActiveWindow
                     .DisplayGridlines = Not HideGridlines
                     .DisplayHeadings = ShowHeadings
                     .DisplayHorizontalScrollBar = ShowHorizontalScrollBar
                     .DisplayVerticalScrollBar = ShowVerticalScrollBar
-                    
+
                     If ZoomPercent <> 0 Then
                         .Zoom = ZoomPercent
                     End If
-                    
+
                     .FreezePanes = False
                     .SplitColumn = 0
-                    
+
                     If IsFrozenPane Then
                         .SplitRow = FreezeAtRow - 1
                         WS.Range("A" & CStr(FreezeAtRow)).Select
@@ -554,7 +580,7 @@ Public Sub DEMO_Build_DemoTemplate( _
                         .SplitRow = 0
                     End If
                 End With
-            
+
             'Apply formula-bar visibility
                 Application.DisplayFormulaBar = ShowFormulaBar
         End If
@@ -567,7 +593,7 @@ CleanExit:
         If SavedErrNum <> 0 Then
             Err.Raise SavedErrNum, SavedErrSrc, SavedErrDesc
         End If
-    
+
     Exit Sub
 
 CleanFail:
@@ -578,11 +604,79 @@ CleanFail:
         SavedErrNum = Err.Number
         SavedErrSrc = Err.Source
         SavedErrDesc = Err.Description
-    
+
     'Continue through the centralized cleanup path
         Resume CleanExit
 
 End Sub
+
+
+Private Function DEMO_ColumnLetter( _
+    ByVal ColIndex As Long) _
+    As String
+'
+'==============================================================================
+'                             COLUMN LETTER
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns the Excel column letter for a 1-based column index
+'
+' WHY THIS EXISTS
+'   Some layout logic derives column positions numerically and then needs a
+'   stable A1-style column label
+'
+' INPUTS
+'   ColIndex
+'     1-based worksheet column index
+'
+' RETURNS
+'   String
+'     Excel column letter text
+'
+' ERROR POLICY
+'   Raises when ColIndex is less than 1
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim N                   As Long          'Working column index
+    Dim R                   As Long          'Current base-26 remainder
+    Dim S                   As String        'Accumulated column text
+
+'------------------------------------------------------------------------------
+' VALIDATE
+'------------------------------------------------------------------------------
+    'Reject invalid column indices
+        If ColIndex < 1 Then
+            Err.Raise vbObjectError + 2025, _
+                      "M_DEMO_BUILDER.DEMO_ColumnLetter", _
+                      "Column index must be >= 1."
+        End If
+
+'------------------------------------------------------------------------------
+' CONVERT INDEX TO LETTER
+'------------------------------------------------------------------------------
+    'Initialize the working index
+        N = ColIndex
+
+    'Convert the numeric column index to Excel letter notation
+        Do While N > 0
+            R = (N - 1) Mod 26
+            S = Chr$(65 + R) & S
+            N = (N - 1) \ 26
+        Loop
+
+'------------------------------------------------------------------------------
+' ASSIGN RESULT
+'------------------------------------------------------------------------------
+    'Return the resolved column letter
+        DEMO_ColumnLetter = S
+
+End Function
 Public Sub DEMO_Begin_FastMode( _
     ByRef StateOut As tDemoFastModeState)
 '
@@ -3141,4 +3235,77 @@ Public Sub Btn_Click()
         Btn_RestoreAppearance Shp, SavedState
 
 End Sub
+
+Public Sub Demo_SB_SetProgress( _
+    ByVal CurrentStep As Long, _
+    ByVal TotalSteps As Long, _
+    ByVal StepText As String)
+'
+'==============================================================================
+'                            SUITE SET PROGRESS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Writes regression-suite progress to the Excel status bar
+'
+' WHY THIS EXISTS
+'   The regression suite can take noticeable time to complete. A visible
+'   progress message makes execution easier to follow
+'
+' INPUTS
+'   CurrentStep
+'     Current completed step count
+'
+'   TotalSteps
+'     Total number of planned suite steps
+'
+'   StepText
+'     Short description of the current step
+'
+' RETURNS
+'   None
+'
+' UPDATED
+'   2026-04-18
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Pct                 As Double       'Completion ratio
+    Dim PercentText         As String       'Formatted completion percentage
+
+'------------------------------------------------------------------------------
+' NORMALIZE INPUTS
+'------------------------------------------------------------------------------
+    'Enforce a minimum total-step count
+        If TotalSteps < 1 Then
+            TotalSteps = 1
+        End If
+
+    'Clamp the current step to the valid range
+        If CurrentStep < 0 Then
+            CurrentStep = 0
+        ElseIf CurrentStep > TotalSteps Then
+            CurrentStep = TotalSteps
+        End If
+
+'------------------------------------------------------------------------------
+' FORMAT PROGRESS
+'------------------------------------------------------------------------------
+    'Compute the completion ratio
+        Pct = CurrentStep / CDbl(TotalSteps)
+    'Format the completion percentage
+        PercentText = Format$(Pct, "0%")
+
+'------------------------------------------------------------------------------
+' WRITE STATUS BAR
+'------------------------------------------------------------------------------
+    'Write the suite-progress message to the Excel status bar
+        Application.StatusBar = _
+            "cPerformanceManager Regression Suite | " & _
+            CStr(CurrentStep) & "/" & CStr(TotalSteps) & " | " & _
+            PercentText & " | " & StepText
+
+End Sub
+
 
