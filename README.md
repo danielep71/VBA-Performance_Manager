@@ -1,4 +1,6 @@
-# cPerformanceManager
+<img width="1766" height="296" alt="performance_manager_banner2" src="https://github.com/user-attachments/assets/8e1d69a6-f867-489a-b388-6760457bc838" />
+
+# Class Performance Manager
 
 > High-precision timing, checkpoint reporting, and Excel runtime control for VBA
 
