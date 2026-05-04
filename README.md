@@ -293,7 +293,7 @@ Optional:
 ## ⚡ Quick start
 
 <p align="left">
-  <img alt="Examples" src="https://img.shields.io/badge/Examples-Timing+Checkpoints+TW-217346">
+  <img alt="Examples" src="https://img.shields.io/badge/Examples-Timing + Checkpoints + TW-217346">
 </p>
 
 ### 1️⃣ Basic timing (default QPC backend)
@@ -428,8 +428,7 @@ End Sub
 ## 🧬 Core public API
 
 <p align="left">
-  <img alt="Section" src="https://img.shields.io/badge/section-public_api-6f42c1">
-  <img alt="Surface" src="https://img.shields.io/badge/surface-timing_tw_reporting-blue">
+  <img alt="Surface" src="https://img.shields.io/badge/Surface-Timing TW Reporting-blue">
 </p>
 
 ### ⏱️ Timing
@@ -484,8 +483,7 @@ End Sub
 ## 🧹 `TW_Enum` flags
 
 <p align="left">
-  <img alt="Section" src="https://img.shields.io/badge/section-tw_enum-6f42c1">
-  <img alt="Type" src="https://img.shields.io/badge/type-bitmask_flags-217346">
+  <img alt="Type" src="https://img.shields.io/badge/Type-Bitmask Flags-217346">
 </p>
 
 Use with `TW_Turn_OFF Except:=...` as bitmask flags:
@@ -508,8 +506,7 @@ cPM.TW_Turn_OFF TW_Enum.ScreenUpdating Or TW_Enum.EnableEvents
 ## 🛡️ Strict mode behavior
 
 <p align="left">
-  <img alt="Section" src="https://img.shields.io/badge/section-strict_mode-6f42c1">
-  <img alt="Validation" src="https://img.shields.io/badge/validation-fail_fast-orange">
+  <img alt="Validation" src="https://img.shields.io/badge/Validation-Fail Fast-orange">
 </p>
 
 - default: `StrictMode = True`
@@ -526,8 +523,7 @@ cPM.TW_Turn_OFF TW_Enum.ScreenUpdating Or TW_Enum.EnableEvents
 ## 🧠 Design notes
 
 <p align="left">
-  <img alt="Section" src="https://img.shields.io/badge/section-design_notes-6f42c1">
-  <img alt="Guidance" src="https://img.shields.io/badge/guidance-best_practices-217346">
+  <img alt="Guidance" src="https://img.shields.io/badge/Guidance-Best practices-217346">
 </p>
 
 - Prefer method `5` (`QueryPerformanceCounter`) for benchmark-grade timing
@@ -544,8 +540,7 @@ cPM.TW_Turn_OFF TW_Enum.ScreenUpdating Or TW_Enum.EnableEvents
 ## 🧪 Running examples and tests
 
 <p align="left">
-  <img alt="Section" src="https://img.shields.io/badge/section-examples_tests-6f42c1">
-  <img alt="Coverage" src="https://img.shields.io/badge/coverage-regression_suite-brightgreen">
+  <img alt="Coverage" src="https://img.shields.io/badge/Coverage-Regression Suite-brightgreen">
 </p>
 
 - Import `demo/M_cPM_USAGE_EXAMPLES.bas` for compact usage examples
@@ -577,8 +572,7 @@ The regression suite covers:
 ## 🏗️ Position in the framework
 
 <p align="left">
-  <img alt="Section" src="https://img.shields.io/badge/section-framework_position-6f42c1">
-  <img alt="Layer" src="https://img.shields.io/badge/layer-execution_engine-217346">
+  <img alt="Layer" src="https://img.shields.io/badge/Layer-Execution Engine-217346">
 </p>
 
 Within the **Excel VBA Runtime Framework**, `cPerformanceManager` is the component responsible for **execution performance, checkpoint instrumentation, and runtime environment control**.
@@ -598,8 +592,7 @@ Framework home:
 ## 📚 Wiki
 
 <p align="left">
-  <img alt="Section" src="https://img.shields.io/badge/section-wiki-6f42c1">
-  <img alt="Docs" src="https://img.shields.io/badge/docs-extended_guidance-blue">
+  <img alt="Docs" src="https://img.shields.io/badge/Docs-Extended Guidance-blue">
 </p>
 
 For additional examples, notes, and repository-level guidance, see the project wiki:
@@ -611,8 +604,7 @@ For additional examples, notes, and repository-level guidance, see the project w
 ## 📄 License
 
 <p align="left">
-  <img alt="Section" src="https://img.shields.io/badge/section-license-6f42c1">
-  <img alt="License" src="https://img.shields.io/badge/license-MIT-green">
+  <img alt="License" src="https://img.shields.io/badge/License-MIT-green">
 </p>
 
 This project is licensed under the terms in `LICENSE`.
@@ -622,8 +614,7 @@ This project is licensed under the terms in `LICENSE`.
 ## 👤 Author
 
 <p align="left">
-  <img alt="Section" src="https://img.shields.io/badge/section-author-6f42c1">
-  <img alt="Maintainer" src="https://img.shields.io/badge/maintainer-Daniele_Penza-217346">
+  <img alt="Maintainer" src="https://img.shields.io/badge/maintainer-Daniele Penza-217346">
 </p>
 
 Daniele Penza
