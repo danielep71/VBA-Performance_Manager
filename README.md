@@ -6,6 +6,17 @@
 
 ---
 
+<p align="center">
+  <img alt="Platform" src="https://img.shields.io/badge/platform-Excel_VBA-217346">
+  <img alt="Layer" src="https://img.shields.io/badge/layer-execution_engine-6f42c1">
+  <img alt="Office" src="https://img.shields.io/badge/office-32%2F64--bit-blue">
+  <img alt="Benchmarking" src="https://img.shields.io/badge/benchmarking-supported-brightgreen">
+  <img alt="Status" src="https://img.shields.io/badge/status-FINAL-brightgreen">
+  <img alt="License" src="https://img.shields.io/badge/license-MIT-green">
+</p>
+
+---
+
 ## Part of a larger framework
 
 This component is part of the **Excel VBA Runtime Framework**.
