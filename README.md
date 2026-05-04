@@ -7,17 +7,21 @@
 ---
 
 <p align="center">
-  <img alt="Platform" src="https://img.shields.io/badge/platform-Excel_VBA-217346">
-  <img alt="Layer" src="https://img.shields.io/badge/layer-execution_engine-6f42c1">
-  <img alt="Office" src="https://img.shields.io/badge/office-32%2F64--bit-blue">
-  <img alt="Benchmarking" src="https://img.shields.io/badge/benchmarking-supported-brightgreen">
-  <img alt="Status" src="https://img.shields.io/badge/status-FINAL-brightgreen">
-  <img alt="License" src="https://img.shields.io/badge/license-MIT-green">
+  <img alt="Platform" src="https://img.shields.io/badge/Platform-Excel_VBA-217346">
+  <img alt="Layer" src="https://img.shields.io/badge/Layer-Execution Engine-6f42c1">
+  <img alt="Office" src="https://img.shields.io/badge/Office-32%2F64--bit-blue">
+  <img alt="Benchmarking" src="https://img.shields.io/badge/Benchmarking-Supported-brightgreen">
+  <img alt="Status" src="https://img.shields.io/badge/Status-FINAL-brightgreen">
+  <img alt="License" src="https://img.shields.io/badge/License-MIT-green">
 </p>
 
 ---
 
 ## 🧩 Part of a larger framework
+
+<p align="left">
+  <img alt="Role" src="https://img.shields.io/badge/Role-Eexecution Engine-217346">
+</p>
 
 This component is part of the **Excel VBA Runtime Framework**.
 
@@ -41,6 +45,10 @@ Framework home:
 
 ## ✨ Overview
 
+<p align="left">
+  <img alt="Focus" src="https://img.shields.io/badge/Focus-Timing %2B Runtime Control-217346">
+</p>
+
 `cPerformanceManager` is a **high-precision timing and execution-control component for Excel VBA on Windows**.
 
 It wraps multiple timing backends behind a single, session-bound interface and adds a practical runtime-control layer for Excel automation.
@@ -63,6 +71,10 @@ This makes `cPerformanceManager` more than a timer utility: it is a **runtime ex
 
 ## 🎯 Why this exists
 
+<p align="left">
+  <img alt="Problem" src="https://img.shields.io/badge/Problem-VBA Timing Limits-orange">
+</p>
+
 VBA’s native timing options are often not ideal for instrumentation and benchmarking:
 
 - ⏲️ `Timer` has limited resolution and rolls over at midnight
@@ -74,6 +86,10 @@ VBA’s native timing options are often not ideal for instrumentation and benchm
 ---
 
 ## 🚀 Core capabilities
+
+<p align="left">
+  <img alt="Scope" src="https://img.shields.io/badge/Scope-Timing Reporting TW-brightgreen">
+</p>
 
 - ⏱️ multiple timing methods behind one interface
 - 🔒 session-bound timing model
@@ -92,6 +108,10 @@ VBA’s native timing options are often not ideal for instrumentation and benchm
 ---
 
 ## 🧹 What are “time-wasters”?
+
+<p align="left">
+  <img alt="Control" src="https://img.shields.io/badge/Control-Excel Application State-217346">
+</p>
 
 “Time-wasters” are Excel application behaviors that can degrade performance during execution, especially in heavy procedures or repeated loops.
 
@@ -113,6 +133,11 @@ This is useful both for:
 ---
 
 ## 🧱 Structured checkpoints and reporting
+
+<p align="left">
+  <img alt="Section" src="https://img.shields.io/badge/section-checkpoints-6f42c1">
+  <img alt="Output" src="https://img.shields.io/badge/output-array_%2B_text_reports-brightgreen">
+</p>
 
 A single elapsed-time value is often not enough.
 
@@ -142,6 +167,11 @@ The report can then be exported as:
 ---
 
 ## 📁 Repository contents
+
+<p align="left">
+  <img alt="Section" src="https://img.shields.io/badge/section-repository_contents-6f42c1">
+  <img alt="Layout" src="https://img.shields.io/badge/layout-src_demo_test-blue">
+</p>
 
 ```text
 /README.md
@@ -180,6 +210,11 @@ These files are optional but useful:
 
 ## 🧭 Typical use cases
 
+<p align="left">
+  <img alt="Section" src="https://img.shields.io/badge/section-use_cases-6f42c1">
+  <img alt="Use" src="https://img.shields.io/badge/use-benchmarking_%2B_automation-217346">
+</p>
+
 ### 📊 Performance benchmarking
 
 Measure execution time with high precision using a consistent API and a preferred high-resolution backend.
@@ -204,6 +239,11 @@ Use shared “time-waster” suppression even when elapsed time is not being mea
 
 ## ⏱️ Timer methods
 
+<p align="left">
+  <img alt="Section" src="https://img.shields.io/badge/section-timer_methods-6f42c1">
+  <img alt="Backends" src="https://img.shields.io/badge/backends-1_to_6-blue">
+</p>
+
 | ID | Method | Notes |
 |---:|---|---|
 | 1 | `Timer` | Seconds since midnight; rolls over every 24 hours |
@@ -217,6 +257,11 @@ Use shared “time-waster” suppression even when elapsed time is not being mea
 
 ## 🧩 Requirements
 
+<p align="left">
+  <img alt="Section" src="https://img.shields.io/badge/section-requirements-6f42c1">
+  <img alt="Host" src="https://img.shields.io/badge/host-windows_excel_vba-217346">
+</p>
+
 - ✅ Microsoft Excel with VBA enabled
 - 🪟 Windows host environment for API-backed timing methods (`2..5`)
 - 🧱 `VBA7` / `Win64` conditional compilation support as required by the host
@@ -227,6 +272,11 @@ Use shared “time-waster” suppression even when elapsed time is not being mea
 ---
 
 ## 🛠️ Installation
+
+<p align="left">
+  <img alt="Section" src="https://img.shields.io/badge/section-installation-6f42c1">
+  <img alt="Flow" src="https://img.shields.io/badge/flow-import_compile_run-brightgreen">
+</p>
 
 1. Open the target workbook, add-in, or VBA project
 2. Open the VBA Editor (`ALT + F11`)
@@ -247,6 +297,11 @@ Optional:
 ---
 
 ## ⚡ Quick start
+
+<p align="left">
+  <img alt="Section" src="https://img.shields.io/badge/section-quick_start-6f42c1">
+  <img alt="Examples" src="https://img.shields.io/badge/examples-timing_checkpoints_tw-217346">
+</p>
 
 ### 1️⃣ Basic timing (default QPC backend)
 
@@ -379,6 +434,11 @@ End Sub
 
 ## 🧬 Core public API
 
+<p align="left">
+  <img alt="Section" src="https://img.shields.io/badge/section-public_api-6f42c1">
+  <img alt="Surface" src="https://img.shields.io/badge/surface-timing_tw_reporting-blue">
+</p>
+
 ### ⏱️ Timing
 
 - `StartTimer(Optional iMethod As Integer = 5, Optional AlignToNextTick As Boolean = False)`
@@ -430,6 +490,11 @@ End Sub
 
 ## 🧹 `TW_Enum` flags
 
+<p align="left">
+  <img alt="Section" src="https://img.shields.io/badge/section-tw_enum-6f42c1">
+  <img alt="Type" src="https://img.shields.io/badge/type-bitmask_flags-217346">
+</p>
+
 Use with `TW_Turn_OFF Except:=...` as bitmask flags:
 
 - `TW_Enum.None`
@@ -449,6 +514,11 @@ cPM.TW_Turn_OFF TW_Enum.ScreenUpdating Or TW_Enum.EnableEvents
 
 ## 🛡️ Strict mode behavior
 
+<p align="left">
+  <img alt="Section" src="https://img.shields.io/badge/section-strict_mode-6f42c1">
+  <img alt="Validation" src="https://img.shields.io/badge/validation-fail_fast-orange">
+</p>
+
 - default: `StrictMode = True`
 - strict mode raises on:
   - invalid timer method
@@ -462,6 +532,11 @@ cPM.TW_Turn_OFF TW_Enum.ScreenUpdating Or TW_Enum.EnableEvents
 
 ## 🧠 Design notes
 
+<p align="left">
+  <img alt="Section" src="https://img.shields.io/badge/section-design_notes-6f42c1">
+  <img alt="Guidance" src="https://img.shields.io/badge/guidance-best_practices-217346">
+</p>
+
 - Prefer method `5` (`QueryPerformanceCounter`) for benchmark-grade timing
 - Use `ElapsedSeconds` for numeric logic and machine-readable results
 - Use `ElapsedTime` for user-facing display
@@ -474,6 +549,11 @@ cPM.TW_Turn_OFF TW_Enum.ScreenUpdating Or TW_Enum.EnableEvents
 ---
 
 ## 🧪 Running examples and tests
+
+<p align="left">
+  <img alt="Section" src="https://img.shields.io/badge/section-examples_tests-6f42c1">
+  <img alt="Coverage" src="https://img.shields.io/badge/coverage-regression_suite-brightgreen">
+</p>
 
 - Import `demo/M_cPM_USAGE_EXAMPLES.bas` for compact usage examples
 - Import `demo/M_cPM_DEMO.bas` and `demo/M_DEMO_BUILDER.bas` for the interactive demo workbook surface
@@ -503,6 +583,11 @@ The regression suite covers:
 
 ## 🏗️ Position in the framework
 
+<p align="left">
+  <img alt="Section" src="https://img.shields.io/badge/section-framework_position-6f42c1">
+  <img alt="Layer" src="https://img.shields.io/badge/layer-execution_engine-217346">
+</p>
+
 Within the **Excel VBA Runtime Framework**, `cPerformanceManager` is the component responsible for **execution performance, checkpoint instrumentation, and runtime environment control**.
 
 It is intended to work alongside complementary components for:
@@ -519,6 +604,11 @@ Framework home:
 
 ## 📚 Wiki
 
+<p align="left">
+  <img alt="Section" src="https://img.shields.io/badge/section-wiki-6f42c1">
+  <img alt="Docs" src="https://img.shields.io/badge/docs-extended_guidance-blue">
+</p>
+
 For additional examples, notes, and repository-level guidance, see the project wiki:
 
 [cPerformanceManager Wiki](https://github.com/danielep71/VBA-Performance_Manager/wiki)
@@ -527,10 +617,20 @@ For additional examples, notes, and repository-level guidance, see the project w
 
 ## 📄 License
 
+<p align="left">
+  <img alt="Section" src="https://img.shields.io/badge/section-license-6f42c1">
+  <img alt="License" src="https://img.shields.io/badge/license-MIT-green">
+</p>
+
 This project is licensed under the terms in `LICENSE`.
 
 ---
 
 ## 👤 Author
+
+<p align="left">
+  <img alt="Section" src="https://img.shields.io/badge/section-author-6f42c1">
+  <img alt="Maintainer" src="https://img.shields.io/badge/maintainer-Daniele_Penza-217346">
+</p>
 
 Daniele Penza
