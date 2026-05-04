@@ -614,7 +614,7 @@ This project is licensed under the terms in `LICENSE`.
 ## 👤 Author
 
 <p align="left">
-  <img alt="Maintainer" src="https://img.shields.io/badge/maintainer-Daniele Penza-217346">
+  <img alt="Maintainer" src="https://img.shields.io/badge/Maintainer-Daniele Penza-217346">
 </p>
 
 Daniele Penza
