@@ -135,8 +135,7 @@ This is useful both for:
 ## 🧱 Structured checkpoints and reporting
 
 <p align="left">
-  <img alt="Section" src="https://img.shields.io/badge/section-checkpoints-6f42c1">
-  <img alt="Output" src="https://img.shields.io/badge/output-array_%2B_text_reports-brightgreen">
+  <img alt="Output" src="https://img.shields.io/badge/Output-Array %2B Text Reports-brightgreen">
 </p>
 
 A single elapsed-time value is often not enough.
@@ -169,8 +168,7 @@ The report can then be exported as:
 ## 📁 Repository contents
 
 <p align="left">
-  <img alt="Section" src="https://img.shields.io/badge/section-repository_contents-6f42c1">
-  <img alt="Layout" src="https://img.shields.io/badge/layout-src_demo_test-blue">
+  <img alt="Layout" src="https://img.shields.io/badge/Layout-Src Demo Test-blue">
 </p>
 
 ```text
@@ -211,8 +209,7 @@ These files are optional but useful:
 ## 🧭 Typical use cases
 
 <p align="left">
-  <img alt="Section" src="https://img.shields.io/badge/section-use_cases-6f42c1">
-  <img alt="Use" src="https://img.shields.io/badge/use-benchmarking_%2B_automation-217346">
+  <img alt="Use" src="https://img.shields.io/badge/Use-benchmarking %2B automation-217346">
 </p>
 
 ### 📊 Performance benchmarking
@@ -240,8 +237,7 @@ Use shared “time-waster” suppression even when elapsed time is not being mea
 ## ⏱️ Timer methods
 
 <p align="left">
-  <img alt="Section" src="https://img.shields.io/badge/section-timer_methods-6f42c1">
-  <img alt="Backends" src="https://img.shields.io/badge/backends-1_to_6-blue">
+  <img alt="Backends" src="https://img.shields.io/badge/Backends-1 to 6-blue">
 </p>
 
 | ID | Method | Notes |
